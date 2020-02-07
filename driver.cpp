@@ -81,13 +81,13 @@ void extract_table_meta_data(const std::string folder_name) {
 const std::string Driver::description() const { return "This driver executes benchmarks and outputs its plan cache to an array of CSV files."; }
 
 void Driver::start() {
-  const auto BENCHMARKS = std::vector<std::string>{"TPC-H", "TPC-DS", "JOB"}; 
+  const auto BENCHMARKS = std::vector<std::string>{"TPC-H", "TPC-DS", "JOB"};
 
   const auto env_var = std::getenv("BENCHMARK_TO_RUN");
   if (env_var == NULL) {
     std::cerr << "Please pass environment variable \"BENCHMARK_TO_RUN\" to set a target benchmark.\nExiting Plugin." << std::flush;
     exit(17);
-  } 
+  }
 
   auto BENCHMARK = std::string(env_var);
   if (std::find(BENCHMARKS.begin(), BENCHMARKS.end(), BENCHMARK) == BENCHMARKS.end()) {
@@ -114,7 +114,7 @@ void Driver::start() {
   //  TPC-H
   //
   if (BENCHMARK == "TPC-H") {
-    SCALE_FACTOR = 0.1f;
+    SCALE_FACTOR = 1.0f;
     config->max_runs = 10;
     config->warmup_duration = std::chrono::seconds(0);
     // const std::vector<BenchmarkItemID> tpch_query_ids_benchmark = {BenchmarkItemID{5}};
