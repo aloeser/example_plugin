@@ -23,6 +23,15 @@ compile_times.txt
 exported_table_statistics.json
 version.hpp
 
+tpch_cached_tables*
+tpcds_cached_tables*
+*.svg
+TPC-*RUNS*/*
+benchmark_results
+exported_tables
+resources
+
+
 # Ignore cmake user files
 *.txt.user
 
