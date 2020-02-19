@@ -8,30 +8,31 @@ class TPCDSBenchmark(AbstractBenchmark):
     return "/home/Alexander.Loeser/example_plugin/build-release/hyriseBenchmarkTPCDS"
 
   def result_path(self):
-    return "/home/Alexander.Loeser/example_plugin/benchmark_results/tpcds_time"
+    return "/home/Alexander.Loeser/example_plugin/benchmark_results/tpcds_time2"
 
   def time(self):
     return 45
 
   def scale(self):
     return 1
-  
+
   def chunk_sizes(self):
-    return [25000, 100000]
+    #return [25000, 100000]
+    return [100000]
 
   def sort_orders(self):
     return {
       "nosort": {},
       "cd_education_status": {
         "customer_demographics": ["cd_education_status"]
-      },  
+      },
       #"ss_net_profit": {
       #  "store_sales": ["ss_net_profit"]
       #},
       #"ca_state": {
       #  "customer_address": ["ca_state"]
       #},
-      "ss_2d": {    
+      "ss_2d": {
         "store_sales": ["ss_net_profit", "ss_quantity"]
       },
       "ss_2d_2": {

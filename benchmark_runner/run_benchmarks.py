@@ -19,7 +19,7 @@ def run_benchmark(benchmark, config_name, chunk_size):
   process_env["TABLE_SORT_ORDER"] = table_sort_order
 
   p = Popen(
-            [benchmark.exec_path(), "--cache_binary_tables", "--time", str(benchmark.time()), "--scale", str(benchmark.scale()), "--chunk_size", str(chunk_size), "--output", f"{benchmark.result_path()}/{config_name}_{chunk_size}.json"],
+            [benchmark.exec_path(), "--cache_binary_tables", "--sql_metrics", "--time", str(benchmark.time()), "--scale", str(benchmark.scale()), "--chunk_size", str(chunk_size), "--output", f"{benchmark.result_path()}/{config_name}_{chunk_size}.json"],
             env=process_env,
             stdout=sys.stdout,
             stdin=sys.stdin,
