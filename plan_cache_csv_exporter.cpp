@@ -8,12 +8,16 @@
 #include "logical_query_plan/join_node.hpp"
 #include "logical_query_plan/predicate_node.hpp"
 #include "logical_query_plan/stored_table_node.hpp"
+#include "operators/abstract_aggregate_operator.hpp"
 #include "operators/operator_join_predicate.hpp"
 #include "operators/operator_scan_predicate.hpp"
-#include "operators/abstract_aggregate_operator.hpp"
+#include "operators/table_wrapper.hpp"
+#include "operators/table_scan.hpp"
+
 #include "sql/sql_pipeline_builder.hpp"
 #include "sql/sql_plan_cache.hpp"
 #include "storage/table.hpp"
+
 
 namespace opossum {
 
@@ -201,6 +205,7 @@ void PlanCacheCsvExporter::_process_index_scan(const std::shared_ptr<const Abstr
   }
 }
 
+
 void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash) {
   std::vector<SingleTableScan> table_scans;
 
@@ -208,6 +213,44 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
   const auto predicate_node = std::dynamic_pointer_cast<const PredicateNode>(node);
 
   const auto predicate = predicate_node->predicate();
+
+  const auto& perf_data = op->performance_data;
+
+  auto description = op->description();
+  description.erase(std::remove(description.begin(), description.end(), '\n'), description.end());
+  description.erase(std::remove(description.begin(), description.end(), '"'), description.end());
+
+  // ugly hack to avoid ColumnVsColumn Scans
+  // note that we should include ColumnVsColumn if both columns are on the same table
+  std::vector<std::string> forbidden_words = {"ColumnVsColumn", "SUBQUERY", "SUM", "AVG", "COUNT"};
+
+  for (const auto& forbidden_word : forbidden_words) {
+    if (description.find(forbidden_word) != std::string::npos)
+      return;
+  }
+
+  auto copied_scan = op->deep_copy();
+  auto copied_table = copied_scan->input_left();
+  Assert(copied_table != nullptr, "we cannot have no input");
+  while (copied_table->input_left() != nullptr) {
+    copied_table = copied_table->input_left();
+  }
+  Assert(copied_table != nullptr, "that went too far down the pqp");
+  auto input_table = std::const_pointer_cast<AbstractOperator>(copied_table);
+
+  input_table->reset_transaction_context();
+  Assert(!input_table->transaction_context_is_set(), "should not have a transaction context");
+  input_table->execute();
+
+  copied_scan->set_input_left(input_table);
+  copied_scan->reset_transaction_context();
+  Assert(!copied_scan->transaction_context_is_set(), "should not have a transaction context");
+  copied_scan->execute();
+  std::cout << "Success!" << std::endl;
+
+  const auto& copied_scan_perf_data = copied_scan->performance_data;
+
+
   // We iterate through the expression until we find the desired column being scanned. This works acceptably ok
   // for most scans we are interested in (e.g., visits both columns of a column vs column scan).
   visit_expression(predicate, [&](const auto& expression) {
@@ -239,15 +282,9 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
           column_name = "COUNT(*)";
         }
 
-        const auto& perf_data = op->performance_data;
-
-        auto description = op->description();
-        description.erase(std::remove(description.begin(), description.end(), '\n'), description.end());
-        description.erase(std::remove(description.begin(), description.end(), '"'), description.end());
-
         table_scans.emplace_back(SingleTableScan{query_hex_hash, column_type, table_name, column_name,
                              *perf_data->input_row_count_left, *perf_data->output_row_count, static_cast<size_t>(perf_data->walltime.count()),
-                             description});
+                             description, *copied_scan_perf_data->input_row_count_left, *copied_scan_perf_data->output_row_count});
       }
     }
     return ExpressionVisitation::VisitArguments;
