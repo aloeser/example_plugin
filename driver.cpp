@@ -114,8 +114,8 @@ void Driver::start() {
   //  TPC-H
   //
   if (BENCHMARK == "TPC-H") {
-      SCALE_FACTOR = 0.1f;
-      config->max_runs = 1;
+      SCALE_FACTOR = 1.0f;
+      config->max_runs = 10;
     config->warmup_duration = std::chrono::seconds(0);
     // const std::vector<BenchmarkItemID> tpch_query_ids_benchmark = {BenchmarkItemID{5}};
     // auto item_runner = std::make_ unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR, tpch_query_ids_benchmark);

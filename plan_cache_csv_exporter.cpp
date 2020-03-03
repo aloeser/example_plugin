@@ -220,8 +220,8 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
   description.erase(std::remove(description.begin(), description.end(), '\n'), description.end());
   description.erase(std::remove(description.begin(), description.end(), '"'), description.end());
 
-  // ugly hack to avoid ColumnVsColumn Scans
-  // note that we should include ColumnVsColumn if both columns are on the same table
+  // ugly hack to avoid queries on temporary columns
+  // skip ColumnVsColumn scans as well, as they cant be pruned
   std::vector<std::string> forbidden_words = {"ColumnVsColumn", "SUBQUERY", "SUM", "AVG", "COUNT"};
 
   for (const auto& forbidden_word : forbidden_words) {
@@ -229,10 +229,22 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
       return;
   }
 
+  std::cout << "trying to re-execute " << description << std::endl;
+
   auto copied_scan = op->deep_copy();
   auto copied_table = copied_scan->input_left();
   Assert(copied_table != nullptr, "we cannot have no input");
   while (copied_table->input_left() != nullptr) {
+    // we are not interested in predicates after joins
+    if (copied_table->type() == OperatorType::JoinHash ||
+        copied_table->type() == OperatorType::JoinIndex ||
+        copied_table->type() == OperatorType::JoinNestedLoop ||
+        copied_table->type() == OperatorType::JoinSortMerge ||
+        copied_table->type() == OperatorType::JoinVerification) {
+      std::cout << "SKIPPED because the scan happened on a " << copied_table->description() << std::endl;
+      return;
+    }
+    std::cout << "walking down the pqp, ignoring a " << copied_table->description() << std::endl;
     copied_table = copied_table->input_left();
   }
   Assert(copied_table != nullptr, "that went too far down the pqp");
@@ -246,7 +258,7 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
   copied_scan->reset_transaction_context();
   Assert(!copied_scan->transaction_context_is_set(), "should not have a transaction context");
   copied_scan->execute();
-  std::cout << "Success!" << std::endl;
+  std::cout << "SUCCESS" << std::endl;
 
   const auto& copied_scan_perf_data = copied_scan->performance_data;
 
