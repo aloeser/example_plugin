@@ -41,8 +41,9 @@ const std::unordered_set<std::string> filename_blacklist() {
 
 void extract_table_meta_data(const std::string folder_name) {
   auto table_to_csv = [](const std::string table_name, const std::string csv_file_name) {
-    const auto& sm = Hyrise::get().storage_manager;
-    const auto table = sm.get_table(table_name);
+    const auto table = SQLPipelineBuilder{"SELECT * FROM " + MetaTableManager::META_PREFIX + table_name}
+                          .create_pipeline()
+                          .get_result_table().second;
     std::ofstream output_file(csv_file_name);
 
     const auto column_names = table->column_names();
@@ -101,7 +102,6 @@ void Driver::start() {
   auto config = std::make_shared<BenchmarkConfig>(BenchmarkConfig::get_default_config());
   config->max_runs = 10;
   config->enable_visualization = false;
-  config->chunk_size = 100'000;
   config->cache_binary_tables = true;
   config->max_duration = std::chrono::seconds(300);
   config->warmup_duration = std::chrono::seconds(20);
@@ -114,8 +114,8 @@ void Driver::start() {
   //  TPC-H
   //
   if (BENCHMARK == "TPC-H") {
-      SCALE_FACTOR = 1.0f;
-      config->max_runs = 10;
+    SCALE_FACTOR = 1.0f;
+    config->max_runs = 10;
     config->warmup_duration = std::chrono::seconds(0);
     // const std::vector<BenchmarkItemID> tpch_query_ids_benchmark = {BenchmarkItemID{5}};
     // auto item_runner = std::make_ unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR, tpch_query_ids_benchmark);
@@ -136,7 +136,11 @@ void Driver::start() {
   else if (BENCHMARK == "TPC-DS") {
     SCALE_FACTOR = 1.0f;
     config->max_runs = 1;
+    config->warmup_duration = std::chrono::seconds(0);
     const std::string query_path = "hyrise/resources/benchmark/tpcds/tpcds-result-reproduction/query_qualification";
+    if (!std::filesystem::exists("resources/")) {
+      std::cout << "When resources for TPC-DS cannot be found on Linux, create a symlink as a workaround: 'ln -s hyrise/resources resources'." << std::endl;
+    }
 
     auto query_generator = std::make_unique<FileBasedBenchmarkItemRunner>(config, query_path, filename_blacklist());
     auto table_generator = std::make_unique<TpcdsTableGenerator>(SCALE_FACTOR, config);
