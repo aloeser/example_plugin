@@ -31,6 +31,7 @@ struct SingleTableScan {
 
   size_t single_input_rows{};
   size_t single_output_rows{};
+  size_t single_runtime_ns{};
 
   std::vector<std::string> string_vector() const {
     std::vector<std::string> result;
@@ -45,13 +46,14 @@ struct SingleTableScan {
     result.emplace_back(wrap_string(description));
     result.emplace_back(std::to_string(single_input_rows));
     result.emplace_back(std::to_string(single_output_rows));
+    result.emplace_back(std::to_string(single_runtime_ns));
 
     return result;
   }
 };
 
 struct WorkloadTableScans {
-  std::string csv_header{"QUERY_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|INPUT_ROWS|OUTPUT_ROWS|RUNTIME_NS|DESCRIPTION|SINGLE_INPUT_ROWS|SINGLE_OUTPUT_ROWS"};
+  std::string csv_header{"QUERY_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|INPUT_ROWS|OUTPUT_ROWS|RUNTIME_NS|DESCRIPTION|SINGLE_INPUT_ROWS|SINGLE_OUTPUT_ROWS|SINGLE_RUNTIME_NS"};
   std::vector<SingleTableScan> instances;
 };
 

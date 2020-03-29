@@ -41,7 +41,7 @@ const std::unordered_set<std::string> filename_blacklist() {
 
 void extract_table_meta_data(const std::string folder_name) {
   auto table_to_csv = [](const std::string table_name, const std::string csv_file_name) {
-    const auto table = SQLPipelineBuilder{"SELECT * FROM " + MetaTableManager::META_PREFIX + table_name}
+    const auto table = SQLPipelineBuilder{"SELECT * FROM " + table_name} // MetaTableManager::META_PREFIX +
                           .create_pipeline()
                           .get_result_table().second;
     std::ofstream output_file(csv_file_name);

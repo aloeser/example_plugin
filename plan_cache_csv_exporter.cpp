@@ -290,16 +290,10 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
           column_name = "COUNT(*)";
         }
 
-        std::string column_name = "";
-        if (original_column_id != INVALID_COLUMN_ID) {
-          column_name = sm_table->column_names()[original_column_id];
-        } else {
-          column_name = "COUNT(*)";
-        }
-
         table_scans.emplace_back(SingleTableScan{query_hex_hash, column_type, table_name, column_name,
                              *perf_data->input_row_count_left, *perf_data->output_row_count, static_cast<size_t>(perf_data->walltime.count()),
-                             description, *copied_scan_perf_data->input_row_count_left, *copied_scan_perf_data->output_row_count});
+                             description, *copied_scan_perf_data->input_row_count_left, *copied_scan_perf_data->output_row_count,
+                             static_cast<size_t>(copied_scan_perf_data->walltime.count())});
       }
     }
     return ExpressionVisitation::VisitArguments;
