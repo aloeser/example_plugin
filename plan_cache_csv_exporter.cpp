@@ -230,8 +230,10 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
 
   auto copied_scan = op->deep_copy();
   auto copied_table = copied_scan->input_left();
-  Assert(copied_table != nullptr, "we cannot have no input");
-  while (copied_table->input_left() != nullptr) {
+  Assert(copied_table, "we cannot have no input");
+
+
+  while (copied_table->input_left()) {
     // we are not interested in predicates after joins
     if (copied_table->type() == OperatorType::JoinHash ||
         copied_table->type() == OperatorType::JoinIndex ||
@@ -244,12 +246,18 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
     std::cout << "walking down the pqp, ignoring a " << copied_table->description() << std::endl;
     copied_table = copied_table->input_left();
   }
-  Assert(copied_table != nullptr, "that went too far down the pqp");
+  Assert(copied_table, "that went too far down the pqp");
   auto input_table = std::const_pointer_cast<AbstractOperator>(copied_table);
 
   input_table->reset_transaction_context();
   Assert(!input_table->transaction_context_is_set(), "should not have a transaction context");
   input_table->execute();
+
+  const auto original_get_table = _get_table_operator_for_table_scan(op);
+  const void * address = static_cast<const void*>(original_get_table.get());
+  std::stringstream address_stream;
+  address_stream << address;
+  const auto get_table_pointer_string = address_stream.str();
 
   copied_scan->set_input_left(input_table);
   copied_scan->reset_transaction_context();
@@ -293,7 +301,7 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
         table_scans.emplace_back(SingleTableScan{query_hex_hash, column_type, table_name, column_name,
                              *perf_data->input_row_count_left, *perf_data->output_row_count, static_cast<size_t>(perf_data->walltime.count()),
                              description, *copied_scan_perf_data->input_row_count_left, *copied_scan_perf_data->output_row_count,
-                             static_cast<size_t>(copied_scan_perf_data->walltime.count())});
+                             static_cast<size_t>(copied_scan_perf_data->walltime.count()), get_table_pointer_string});
       }
     }
     return ExpressionVisitation::VisitArguments;
@@ -438,6 +446,18 @@ void PlanCacheCsvExporter::_process_projection(const std::shared_ptr<const Abstr
   _projections.instances.insert(_projections.instances.end(), projections.begin(), projections.end());
 }
 
+// Only call this function on table scans that are not based on a join
+const std::shared_ptr<const AbstractOperator> PlanCacheCsvExporter::_get_table_operator_for_table_scan(const std::shared_ptr<const AbstractOperator> table_scan) const {
+  Assert(table_scan->type() == OperatorType::TableScan, "not a TableScan");
+
+  auto op = table_scan;
+  while (op->input_left()) {
+    op = op->input_left();
+  }
+
+  Assert(op->type() == OperatorType::GetTable, "not a GetTable");
+  return op;
+}
 
 void PlanCacheCsvExporter::_process_pqp(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash,
                                         std::unordered_set<std::shared_ptr<const AbstractOperator>>& visited_pqp_nodes) {

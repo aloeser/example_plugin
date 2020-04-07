@@ -33,6 +33,8 @@ struct SingleTableScan {
   size_t single_output_rows{};
   size_t single_runtime_ns{};
 
+  std::string operator_pointer{};
+
   std::vector<std::string> string_vector() const {
     std::vector<std::string> result;
 
@@ -47,13 +49,14 @@ struct SingleTableScan {
     result.emplace_back(std::to_string(single_input_rows));
     result.emplace_back(std::to_string(single_output_rows));
     result.emplace_back(std::to_string(single_runtime_ns));
+    result.emplace_back(wrap_string(operator_pointer));
 
     return result;
   }
 };
 
 struct WorkloadTableScans {
-  std::string csv_header{"QUERY_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|INPUT_ROWS|OUTPUT_ROWS|RUNTIME_NS|DESCRIPTION|SINGLE_INPUT_ROWS|SINGLE_OUTPUT_ROWS|SINGLE_RUNTIME_NS"};
+  std::string csv_header{"QUERY_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|INPUT_ROWS|OUTPUT_ROWS|RUNTIME_NS|DESCRIPTION|SINGLE_INPUT_ROWS|SINGLE_OUTPUT_ROWS|SINGLE_RUNTIME_NS|OPERATOR_POINTER"};
   std::vector<SingleTableScan> instances;
 };
 
@@ -105,6 +108,7 @@ class PlanCacheCsvExporter {
   void _process_index_scan(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);
   std::string _process_join(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);
 
+  const std::shared_ptr<const AbstractOperator> _get_table_operator_for_table_scan(const std::shared_ptr<const AbstractOperator> table_scan) const;
   void _process_pqp(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash,
                     std::unordered_set<std::shared_ptr<const AbstractOperator>>& visited_pqp_nodes);
   void _extract_physical_query_plan_cache_data() const;
