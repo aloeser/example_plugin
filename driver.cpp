@@ -4,11 +4,16 @@
 #include "driver.hpp"
 #include "plan_cache_csv_exporter.hpp"
 
-#include "hyrise.hpp"
 #include "benchmark_config.hpp"
 #include "benchmark_runner.hpp"
+#include "boost/variant/get.hpp"
 #include "file_based_benchmark_item_runner.hpp"
 #include "file_based_table_generator.hpp"
+#include "hyrise.hpp"
+#include "statistics/statistics_objects/abstract_histogram.hpp"
+#include "statistics/table_statistics.hpp"
+#include "statistics/attribute_statistics.hpp"
+#include "statistics/base_attribute_statistics.hpp"
 #include "sql/sql_pipeline_builder.hpp"
 #include "tpch/tpch_benchmark_item_runner.hpp"
 #include "tpch/tpch_table_generator.hpp"
@@ -40,8 +45,8 @@ const std::unordered_set<std::string> filename_blacklist() {
 }
 
 void extract_table_meta_data(const std::string folder_name) {
-  auto table_to_csv = [](const std::string table_name, const std::string csv_file_name) {
-    const auto table = SQLPipelineBuilder{"SELECT * FROM " + table_name} // MetaTableManager::META_PREFIX +
+  auto table_to_csv = [](const std::string table_name, const std::string csv_file_name, const bool show_distinct_value_count = false) {
+    const auto table = SQLPipelineBuilder{"SELECT * FROM " + table_name}
                           .create_pipeline()
                           .get_result_table().second;
     std::ofstream output_file(csv_file_name);
@@ -52,6 +57,10 @@ void extract_table_meta_data(const std::string folder_name) {
       if (column_id < (column_names.size() - 1)) {
         output_file << "|";
       }
+    }
+
+    if (show_distinct_value_count) {
+      output_file << "|distinct_values";
     }
     output_file << std::endl;
 
@@ -64,8 +73,34 @@ void extract_table_meta_data(const std::string folder_name) {
         output_file << row[column_id];
         if (data_types[column_id] == DataType::String) output_file << "\"";
         if (column_id < (row.size() - 1)) {
-        output_file << "|";
+          output_file << "|";
         }
+      }
+      if (show_distinct_value_count) {
+        const auto benchmark_table_name = boost::lexical_cast<std::string>(row[0]);
+        const auto benchmark_table = Hyrise::get().storage_manager.get_table(benchmark_table_name);
+        Assert(benchmark_table, "could not get table " + benchmark_table_name);
+
+        const auto table_statistics = benchmark_table->table_statistics();
+        const auto benchmark_column_name = boost::lexical_cast<std::string>(row[1]);
+        const auto benchmark_column_id = benchmark_table->column_id_by_name(benchmark_column_name);
+        const auto benchmark_column_type = benchmark_table->column_data_type(benchmark_column_id);
+        const auto base_attribute_statistics = table_statistics->column_statistics[benchmark_column_id];
+
+
+        resolve_data_type(benchmark_column_type, [&](const auto data_type_t) {
+          using ColumnDataType = typename decltype(data_type_t)::type;
+          const auto attribute_statistics = std::dynamic_pointer_cast<AttributeStatistics<ColumnDataType>>(base_attribute_statistics);
+          Assert(attribute_statistics, "could not cast to AttributeStatistics");
+          const auto histogram = attribute_statistics->histogram;
+          if (!histogram) {
+            std::cout << "no histogram available for column " << benchmark_column_name << " of table " << benchmark_table_name << std::endl;
+            output_file << "|" << 1;
+          } else {
+            Assert(histogram, "no histgram for " + benchmark_table_name);
+            output_file << "|" << histogram->total_distinct_count();
+          }
+        });
       }
       output_file << std::endl;
     }
@@ -74,7 +109,7 @@ void extract_table_meta_data(const std::string folder_name) {
   //table_to_csv("meta_segments", folder_name + "/segment_meta_data2.csv");
   table_to_csv("meta_segments_accurate", folder_name + "/segment_meta_data.csv");
   table_to_csv("meta_tables", folder_name + "/table_meta_data.csv");
-  table_to_csv("meta_columns", folder_name + "/column_meta_data.csv");
+  table_to_csv("meta_columns", folder_name + "/column_meta_data.csv", true);
 }
 
 }  // namespace
