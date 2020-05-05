@@ -101,6 +101,8 @@ class PlanCacheCsvExporter {
  private:
   StorageManager& _sm;
 
+  size_t _output_size(const std::shared_ptr<const AbstractOperator>& op) const;
+
   void _process_table_scan(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);
   std::string _process_validate(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);
   std::string _process_aggregate(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);

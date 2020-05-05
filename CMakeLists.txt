@@ -1,6 +1,13 @@
 # BenchmarkLib disables unity for TPC-DS. Let's try the same here.
 set(CMAKE_UNITY_BUILD "OFF")
 
+if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
+    set(HYRISE_DEBUG 1)
+else()
+    set(HYRISE_DEBUG 0)
+endif()
+
+
 # Usually, you should not have to touch the following part ##########################################
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)                                                    #
                                                                                                     #
@@ -33,7 +40,8 @@ add_compile_options(-pthread -Wall -Wextra -pedantic -Werror -Wno-unused-paramet
 -Wno-dollar-in-identifier-extension -Wno-unknown-pragmas)                                           #
 
 set(CMAKE_CXX_STANDARD_REQUIRED ON)                                                                 #
-set(CMAKE_CXX_STANDARD 20)                                                                          #
+set(CMAKE_CXX_STANDARD 20)       
+                                                                                                    #
                                                                                                     #
 #####################################################################################################
 

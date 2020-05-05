@@ -18,7 +18,6 @@
 #include "sql/sql_plan_cache.hpp"
 #include "storage/table.hpp"
 
-
 namespace opossum {
 
 PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name) : _sm{Hyrise::get().storage_manager}, _export_folder_name{export_folder_name}, _table_scans{}, _projections{} {
@@ -151,9 +150,9 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
 
       // auto table_id = _table_name_id_map.left.at(table_name_0);
       // auto identifier = std::make_pair(table_id, original_column_id_0);
-      ss << table_name_0 << "," << column_name_0 << "," << *(perf_data->input_row_count_left)  << ",";
-      ss << table_name_1 << "," << column_name_1 << "," << *(perf_data->input_row_count_right) << ",";
-      ss << *perf_data->output_row_count << ",";
+      ss << table_name_0 << "," << column_name_0 << "," << _output_size(op->input_left())  << ",";
+      ss << table_name_1 << "," << column_name_1 << "," << _output_size(op->input_right()) << ",";
+      ss << perf_data->output_row_count << ",";
       ss << join_node->node_expressions.size() << "," << predicate_condition_to_string.left.at((*operator_predicate).predicate_condition) << ",";
       ss << perf_data->walltime.count() << "\n";
       // update_map(join_map, identifier, perf_data);
@@ -192,8 +191,7 @@ void PlanCacheCsvExporter::_process_index_scan(const std::shared_ptr<const Abstr
             const auto& table_name = stored_table_node->table_name;
             // const auto table_id = _table_name_id_map.left.at(table_name);
 
-            const auto& perf_data = op->performance_data;
-            std::cout << table_name << "," << *(perf_data->input_row_count_left) << std::endl;
+            std::cout << table_name << "," << _output_size(op->input_left()) << std::endl;
           }
         }
         return ExpressionVisitation::VisitArguments;
@@ -299,8 +297,8 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
         }
 
         table_scans.emplace_back(SingleTableScan{query_hex_hash, column_type, table_name, column_name,
-                             *perf_data->input_row_count_left, *perf_data->output_row_count, static_cast<size_t>(perf_data->walltime.count()),
-                             description, *copied_scan_perf_data->input_row_count_left, *copied_scan_perf_data->output_row_count,
+                             _output_size(op->input_left()), perf_data->output_row_count, static_cast<size_t>(perf_data->walltime.count()),
+                             description, _output_size(copied_scan->input_left()), copied_scan_perf_data->output_row_count,
                              static_cast<size_t>(copied_scan_perf_data->walltime.count()), get_table_pointer_string});
       }
     }
@@ -314,9 +312,16 @@ std::string PlanCacheCsvExporter::_process_validate(const std::shared_ptr<const 
   const auto& perf_data = op->performance_data;
 
   std::stringstream ss;
-  ss << query_hex_hash << "," << *(perf_data->input_row_count_left) << "," << *perf_data->output_row_count << "," << perf_data->walltime.count() << "\n";
+  ss << query_hex_hash << "," << _output_size(op->input_left()) << "," << perf_data->output_row_count << "," << perf_data->walltime.count() << "\n";
 
   return ss.str();
+}
+
+size_t PlanCacheCsvExporter::_output_size(const std::shared_ptr<const AbstractOperator>& op) const {
+  Assert(op, "op is nullptr");
+  Assert(op->performance_data, "op->performance_data is nullptr");
+  Assert(op->performance_data->has_output, "op has no output");
+  return op->performance_data->output_row_count;
 }
 
 std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash) {
@@ -363,8 +368,8 @@ std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const
           } else {
             column_name = "COUNT(*)";
           }
-          ss << column_name << "," << *(perf_data->input_row_count_left) << ",";
-          ss << *perf_data->output_row_count << ",";
+          ss << column_name << "," << _output_size(op->input_left()) << ",";
+          ss << perf_data->output_row_count << ",";
           ss << perf_data->walltime.count() << ",\"";
           ss << op->description() << "\"\n";
         }
@@ -412,8 +417,8 @@ void PlanCacheCsvExporter::_process_projection(const std::shared_ptr<const Abstr
           description.erase(std::remove(description.begin(), description.end(), '\n'), description.end());
           description.erase(std::remove(description.begin(), description.end(), '"'), description.end());
 
-          projections.emplace_back(SingleProjection{query_hex_hash, proj_hex_hash_str, column_type, table_name, column_name, *perf_data->input_row_count_left,
-            *perf_data->output_row_count, static_cast<size_t>(perf_data->walltime.count()), description});
+          projections.emplace_back(SingleProjection{query_hex_hash, proj_hex_hash_str, column_type, table_name, column_name, _output_size(op->input_left()),
+            perf_data->output_row_count, static_cast<size_t>(perf_data->walltime.count()), description});
         }
       }
       // TODO: does that help???
@@ -500,4 +505,4 @@ void PlanCacheCsvExporter::_process_pqp(const std::shared_ptr<const AbstractOper
   }
 }
 
-}  // namespace opossum
+}  // namespace opossum 
