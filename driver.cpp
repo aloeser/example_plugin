@@ -143,6 +143,7 @@ void Driver::start() {
 
   constexpr auto USE_PREPARED_STATEMENTS = false;
   auto SCALE_FACTOR = 17.0f;  // later overwritten
+  const auto MAX_RUNTIME = 60;
 
 
   //
@@ -152,6 +153,7 @@ void Driver::start() {
     SCALE_FACTOR = 1.0f;
     config->max_runs = 10;
     config->warmup_duration = std::chrono::seconds(0);
+    config->max_duration = std::chrono::seconds(MAX_RUNTIME);
     // const std::vector<BenchmarkItemID> tpch_query_ids_benchmark = {BenchmarkItemID{5}};
     // auto item_runner = std::make_ unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR, tpch_query_ids_benchmark);
     auto item_runner = std::make_unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR);
@@ -210,7 +212,7 @@ void Driver::start() {
   //  /JOB
   //
 
-  const std::string folder_name = std::string(BENCHMARK) + "__SF_" + std::to_string(SCALE_FACTOR) + "__RUNS_" + std::to_string(config->max_runs);
+  const std::string folder_name = std::string(BENCHMARK) + "__SF_" + std::to_string(SCALE_FACTOR) + "__RUNS_" + std::to_string(config->max_runs) + "__TIME_" + std::to_string(MAX_RUNTIME);
   std::filesystem::create_directories(folder_name);
 
   std::cout << "Exporting table/column/segments meta data." << std::endl;
