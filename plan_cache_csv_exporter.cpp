@@ -105,12 +105,12 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
 
       // if (*column_expression == *(predicate_expression->arguments[0])) {
       {
-        const auto column_expression = predicate_expression->arguments[0];
-        if (column_expression->type == ExpressionType::LQPColumn) {
-          const auto column_reference = std::dynamic_pointer_cast<LQPColumnExpression>(column_expression)->column_reference;
-          original_column_id_0 = column_reference.original_column_id();
+        const auto expression = predicate_expression->arguments[0];
+        if (expression->type == ExpressionType::LQPColumn) {
+          const auto column_expression = std::dynamic_pointer_cast<const LQPColumnExpression>(expression);
+          original_column_id_0 = column_expression->original_column_id;
 
-          const auto original_node_0 = column_reference.original_node();
+          const auto original_node_0 = column_expression->original_node.lock();
           if (original_node_0->type == LQPNodeType::StoredTable) {
             const auto stored_table_node_0 = std::dynamic_pointer_cast<const StoredTableNode>(original_node_0);
             table_name_0 = stored_table_node_0->table_name;
@@ -121,12 +121,12 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
 
       // if (*column_expression == *(predicate_expression->arguments[1])) {
       {
-        const auto column_expression = predicate_expression->arguments[1];
-        if (column_expression->type == ExpressionType::LQPColumn) {
-          const auto column_reference = std::dynamic_pointer_cast<LQPColumnExpression>(column_expression)->column_reference;
-          original_column_id_1 = column_reference.original_column_id();
+        const auto expression = predicate_expression->arguments[1];
+        if (expression->type == ExpressionType::LQPColumn) {
+          const auto column_expression = std::dynamic_pointer_cast<const LQPColumnExpression>(expression);
+          original_column_id_1 = column_expression->original_column_id;
           
-          const auto original_node_1 = column_reference.original_node();
+          const auto original_node_1 = column_expression->original_node.lock();
           if (original_node_1->type == LQPNodeType::StoredTable) {
             const auto stored_table_node_1 = std::dynamic_pointer_cast<const StoredTableNode>(original_node_1);
             table_name_1 = stored_table_node_1->table_name;
@@ -150,8 +150,22 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
 
       // auto table_id = _table_name_id_map.left.at(table_name_0);
       // auto identifier = std::make_pair(table_id, original_column_id_0);
-      ss << table_name_0 << "," << column_name_0 << "," << _output_size(op->input_left())  << ",";
-      ss << table_name_1 << "," << column_name_1 << "," << _output_size(op->input_right()) << ",";
+
+
+    const auto left_input = join_node->left_input();
+    const auto right_input = join_node->right_input();
+    const auto left_in_left = left_input->find_column_id(*predicate_expression->arguments[0]);
+    const auto right_in_right = right_input->find_column_id(*predicate_expression->arguments[1]);
+    if (left_in_left && right_in_right) {
+    //if (true) {
+        ss << table_name_0 << "," << column_name_0 << "," << _output_size(op->input_left())  << ",";
+        ss << table_name_1 << "," << column_name_1 << "," << _output_size(op->input_right()) << ",";
+    } else {
+        ss << table_name_1 << "," << column_name_1 << "," << _output_size(op->input_left())  << ",";
+        ss << table_name_0 << "," << column_name_0 << "," << _output_size(op->input_right()) << ",";
+    }
+
+
       ss << perf_data->output_row_count << ",";
       ss << join_node->node_expressions.size() << "," << predicate_condition_to_string.left.at((*operator_predicate).predicate_condition) << ",";
       ss << perf_data->walltime.count() << "\n";
@@ -183,8 +197,7 @@ void PlanCacheCsvExporter::_process_index_scan(const std::shared_ptr<const Abstr
       visit_expression(el, [&](const auto& expression) {
         if (expression->type == ExpressionType::LQPColumn) {
           const auto column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(expression);
-          const auto column_reference = column_expression->column_reference;
-          const auto original_node = column_reference.original_node();
+          const auto original_node = column_expression->original_node.lock();
 
           if (original_node->type == LQPNodeType::StoredTable) {
             const auto stored_table_node = std::dynamic_pointer_cast<const StoredTableNode>(original_node);
@@ -272,8 +285,7 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
     std::string column_type{};
     if (expression->type == ExpressionType::LQPColumn) {
       const auto column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(expression);
-      const auto column_reference = column_expression->column_reference;
-      const auto original_node = column_reference.original_node();
+      const auto original_node = column_expression->original_node.lock();
 
       // Check if scan on data or reference table (this should ignore scans of temporary columns)
       if (original_node->type == LQPNodeType::StoredTable) {
@@ -287,7 +299,7 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
         const auto stored_table_node = std::dynamic_pointer_cast<const StoredTableNode>(original_node);
         const auto& table_name = stored_table_node->table_name;
 
-        const auto original_column_id = column_reference.original_column_id();
+        const auto original_column_id = column_expression->original_column_id;
         const auto sm_table = _sm.get_table(table_name);
         std::string column_name = "";
         if (original_column_id != INVALID_COLUMN_ID) {
@@ -339,8 +351,7 @@ std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const
     visit_expression(el, [&](const auto& expression) {
       if (expression->type == ExpressionType::LQPColumn) {
         const auto column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(expression);
-        const auto column_reference = column_expression->column_reference;
-        const auto original_node = column_reference.original_node();
+        const auto original_node = column_expression->original_node.lock();
 
         if (original_node->type == LQPNodeType::StoredTable) {
           ss << query_hex_hash << "," << agg_hex_hash.str() << ",";
@@ -354,7 +365,7 @@ std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const
           const auto& table_name = stored_table_node->table_name;
           ss << table_name << ",";
 
-          const auto original_column_id = column_reference.original_column_id();
+          const auto original_column_id = column_expression->original_column_id;
           const auto& perf_data = op->performance_data;
 
           const auto node_expression_count = aggregate_node->node_expressions.size();
@@ -397,13 +408,12 @@ void PlanCacheCsvExporter::_process_projection(const std::shared_ptr<const Abstr
     visit_expression(el, [&](const auto& expression) {
       if (expression->type == ExpressionType::LQPColumn) {
         const auto column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(expression);
-        const auto column_reference = column_expression->column_reference;
-        const auto original_node = column_reference.original_node();
+        const auto original_node = column_expression->original_node.lock();
 
         if (original_node->type == LQPNodeType::StoredTable) {
           const auto stored_table_node = std::dynamic_pointer_cast<const StoredTableNode>(original_node);
           const auto& table_name = stored_table_node->table_name;
-          const auto original_column_id = column_reference.original_column_id();
+          const auto original_column_id = column_expression->original_column_id;
           const std::string column_type = (original_node == node->left_input()) ? "DATA" : "REFERENCE";
           const auto& perf_data = op->performance_data;
           const auto sm_table = _sm.get_table(table_name);
