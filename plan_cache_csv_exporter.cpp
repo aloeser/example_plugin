@@ -29,7 +29,7 @@ PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name)
   validates_csv.open(_export_folder_name + "/validates.csv");
   aggregates_csv.open(_export_folder_name + "/aggregates.csv");
 
-  joins_csv << "QUERY_HASH,JOIN_MODE,LEFT_TABLE_NAME,LEFT_COLUMN_NAME,LEFT_TABLE_ROW_COUNT,RIGHT_TABLE_NAME,RIGHT_COLUMN_NAME,RIGHT_TABLE_ROW_COUNT,OUTPUT_ROWS,PREDICATE_COUNT,PRIMARY_PREDICATE,RUNTIME_NS\n";
+  joins_csv << "QUERY_HASH,JOIN_MODE,LEFT_TABLE_NAME,LEFT_COLUMN_NAME,LEFT_TABLE_ROW_COUNT,RIGHT_TABLE_NAME,RIGHT_COLUMN_NAME,RIGHT_TABLE_ROW_COUNT,OUTPUT_ROWS,PREDICATE_COUNT,PRIMARY_PREDICATE,RUNTIME_NS,MATERIALIZE,CLUSTER,BUILD,PROBE,WRITE_OUTPUT,DESCRIPTION\n";
   validates_csv << "QUERY_HASH,INPUT_ROWS,OUTPUT_ROWS,RUNTIME_NS\n";
   aggregates_csv << "QUERY_HASH,AGGREGATE_HASH,COLUMN_TYPE,TABLE_NAME,COLUMN_NAME,GROUP_BY_COLUMN_COUNT,AGGREGATE_COLUMN_COUNT,INPUT_ROWS,OUTPUT_ROWS,RUNTIME_NS,DESCRIPTION\n";
 
@@ -134,6 +134,7 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
         }
       }
       // }
+
       const auto& perf_data = op->performance_data;
 
       std::string column_name_0, column_name_1;
@@ -168,8 +169,18 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
 
       ss << perf_data->output_row_count << ",";
       ss << join_node->node_expressions.size() << "," << predicate_condition_to_string.left.at((*operator_predicate).predicate_condition) << ",";
-      ss << perf_data->walltime.count() << "\n";
+      ss << perf_data->walltime.count();
       // update_map(join_map, identifier, perf_data);
+
+      const auto step_perf_data = static_cast<StepOperatorPerformanceData*>(perf_data.get());
+      if (step_perf_data) {
+        for (size_t step = 0; step < 5; step++) {
+          ss << "," << step_perf_data->step_runtimes[step].count();
+        }
+      } else {
+        ss << ",0,0,0,0,0";
+      }
+      ss << "," << op->description() << "\n";
 
       // How do we know whether the left_input_rows are actually added to the left table?
       // table_id = _table_name_id_map.left.at(table_name_1);
