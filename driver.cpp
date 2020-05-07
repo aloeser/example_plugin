@@ -11,6 +11,8 @@
 #include "file_based_table_generator.hpp"
 #include "hyrise.hpp"
 #include "statistics/statistics_objects/abstract_histogram.hpp"
+#include "statistics/statistics_objects/min_max_filter.hpp"
+#include "statistics/statistics_objects/range_filter.hpp"
 #include "statistics/table_statistics.hpp"
 #include "statistics/attribute_statistics.hpp"
 #include "statistics/base_attribute_statistics.hpp"
@@ -60,7 +62,7 @@ void extract_table_meta_data(const std::string folder_name) {
     }
 
     if (show_distinct_value_count) {
-      output_file << "|distinct_values";
+      output_file << "|distinct_values|is_globally_sorted";
     }
     output_file << std::endl;
 
@@ -85,21 +87,68 @@ void extract_table_meta_data(const std::string folder_name) {
         const auto benchmark_column_name = boost::lexical_cast<std::string>(row[1]);
         const auto benchmark_column_id = benchmark_table->column_id_by_name(benchmark_column_name);
         const auto benchmark_column_type = benchmark_table->column_data_type(benchmark_column_id);
-        const auto base_attribute_statistics = table_statistics->column_statistics[benchmark_column_id];
 
+        auto distinct_value_count = -1;
 
         resolve_data_type(benchmark_column_type, [&](const auto data_type_t) {
           using ColumnDataType = typename decltype(data_type_t)::type;
-          const auto attribute_statistics = std::dynamic_pointer_cast<AttributeStatistics<ColumnDataType>>(base_attribute_statistics);
+          const auto table_attribute_statistics = table_statistics->column_statistics[benchmark_column_id];
+          const auto attribute_statistics = std::dynamic_pointer_cast<AttributeStatistics<ColumnDataType>>(table_attribute_statistics);
           Assert(attribute_statistics, "could not cast to AttributeStatistics");
           const auto histogram = attribute_statistics->histogram;
           if (!histogram) {
             std::cout << "no histogram available for column " << benchmark_column_name << " of table " << benchmark_table_name << std::endl;
-            output_file << "|" << 1;
+            distinct_value_count = 1;
           } else {
-            Assert(histogram, "no histgram for " + benchmark_table_name);
-            output_file << "|" << histogram->total_distinct_count();
+            distinct_value_count = histogram->total_distinct_count();
           }
+        });
+        output_file << "|" << distinct_value_count;
+
+
+        resolve_data_type(benchmark_column_type, [&](const auto data_type_t) {
+          using ColumnDataType = typename decltype(data_type_t)::type;
+          std::optional<ColumnDataType> old_max;
+          bool assume_sorted = true;
+
+          for (ChunkID chunk_id{0}; chunk_id < benchmark_table->chunk_count(); chunk_id++) {
+            const auto& chunk = benchmark_table->get_chunk(chunk_id);
+            if (chunk) {
+              Assert(chunk->pruning_statistics(), "Chunk has no pruning statistics");
+              const auto& pruning_statistics = *chunk->pruning_statistics();
+              Assert(benchmark_column_id < pruning_statistics.size(), "benchmark_column_id out of bounds");
+              const auto& column_attribute_statistics = pruning_statistics[benchmark_column_id];
+              const auto attribute_statistics = std::dynamic_pointer_cast<AttributeStatistics<ColumnDataType>>(column_attribute_statistics);
+              Assert(attribute_statistics, "could not cast to AttributeStatistics");
+
+
+              std::cout << "Comparing" << std::endl;
+              if constexpr (std::is_arithmetic_v<ColumnDataType>) {
+                const auto range_filter = attribute_statistics->range_filter;
+                Assert(range_filter, "no range filter despite arithmetic type");
+                const auto& ranges = range_filter->ranges;
+                if (old_max && *old_max > ranges[0].first) {
+                  assume_sorted = false;
+                  break;
+                }
+                old_max = ranges.back().second;
+              } else {
+                const auto min_max_filter = attribute_statistics->min_max_filter;
+                Assert(min_max_filter, "no min max filter despite non-arithmetic type");
+                if (old_max && *old_max > min_max_filter->min) {
+                  assume_sorted = false;
+                  break;
+                }
+                old_max = min_max_filter->max;
+              }
+            }
+          }
+
+          if (benchmark_table->chunk_count() <= 1 || distinct_value_count <= 1) {
+            assume_sorted = false;
+          }
+
+          output_file << "|" << assume_sorted;
         });
       }
       output_file << std::endl;
