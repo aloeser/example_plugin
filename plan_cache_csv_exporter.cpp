@@ -9,8 +9,10 @@
 #include "logical_query_plan/predicate_node.hpp"
 #include "logical_query_plan/stored_table_node.hpp"
 #include "operators/abstract_aggregate_operator.hpp"
+#include "operators/abstract_join_operator.hpp"
 #include "operators/operator_join_predicate.hpp"
 #include "operators/operator_scan_predicate.hpp"
+#include "operators/join_hash.hpp"
 #include "operators/table_wrapper.hpp"
 #include "operators/table_scan.hpp"
 
@@ -29,7 +31,7 @@ PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name)
   validates_csv.open(_export_folder_name + "/validates.csv");
   aggregates_csv.open(_export_folder_name + "/aggregates.csv");
 
-  joins_csv << "QUERY_HASH,JOIN_MODE,LEFT_TABLE_NAME,LEFT_COLUMN_NAME,LEFT_TABLE_ROW_COUNT,RIGHT_TABLE_NAME,RIGHT_COLUMN_NAME,RIGHT_TABLE_ROW_COUNT,OUTPUT_ROWS,PREDICATE_COUNT,PRIMARY_PREDICATE,RUNTIME_NS,MATERIALIZE,CLUSTER,BUILD,PROBE,WRITE_OUTPUT,DESCRIPTION\n";
+  joins_csv << "QUERY_HASH,JOIN_MODE,LEFT_TABLE_NAME,LEFT_COLUMN_NAME,LEFT_TABLE_ROW_COUNT,RIGHT_TABLE_NAME,RIGHT_COLUMN_NAME,RIGHT_TABLE_ROW_COUNT,OUTPUT_ROWS,PREDICATE_COUNT,PRIMARY_PREDICATE,RUNTIME_NS,MATERIALIZE,CLUSTER,BUILD,PROBE,WRITE_OUTPUT,DESCRIPTION,BUILD_TABLE,BUILD_COLUMN,BUILD_TABLE_SIZE,PROBE_TABLE,PROBE_COLUMN,PROBE_TABLE_SIZE,BUILD_SORTED,PROBE_SORTED\n";
   validates_csv << "QUERY_HASH,INPUT_ROWS,OUTPUT_ROWS,RUNTIME_NS\n";
   aggregates_csv << "QUERY_HASH,AGGREGATE_HASH,COLUMN_TYPE,TABLE_NAME,COLUMN_NAME,GROUP_BY_COLUMN_COUNT,AGGREGATE_COLUMN_COUNT,INPUT_ROWS,OUTPUT_ROWS,RUNTIME_NS,DESCRIPTION\n";
 
@@ -40,7 +42,7 @@ PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name)
 
 void PlanCacheCsvExporter::run() {
   std::ofstream plan_cache_csv_file(_export_folder_name + "/plan_cache.csv");
-  plan_cache_csv_file << "QUERY_HASH,EXECUTION_COUNT,QUERY_STRING\n";
+  plan_cache_csv_file << "QUERY_HASH|EXECUTION_COUNT|QUERY_STRING\n";
 
   // for (const auto& [query_string, physical_query_plan] : *SQLPipelineBuilder::default_pqp_cache) {
   for (auto iter = Hyrise::get().default_pqp_cache->unsafe_begin(); iter != Hyrise::get().default_pqp_cache->unsafe_end(); ++iter) {
@@ -58,7 +60,7 @@ void PlanCacheCsvExporter::run() {
     auto query_single_line{query_string};
     query_single_line.erase(std::remove(query_single_line.begin(), query_single_line.end(), '\n'),
                             query_single_line.end());
-    plan_cache_csv_file << "\"" << query_hex_hash.str() << "\"" << "," << frequency << ",\"" << query_single_line << "\"\n";
+    plan_cache_csv_file << "\"" << query_hex_hash.str() << "\"" << "|" << frequency << "|\"" << query_single_line << "\"\n";
   }
 
   write_to_disk();
@@ -152,20 +154,16 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
       // auto table_id = _table_name_id_map.left.at(table_name_0);
       // auto identifier = std::make_pair(table_id, original_column_id_0);
 
+      if (operator_predicate->is_flipped()) {
+        std::swap(table_name_0, table_name_1);
+        std::swap(column_name_0, column_name_1);
+      }
 
-    const auto left_input = join_node->left_input();
-    const auto right_input = join_node->right_input();
-    const auto left_in_left = left_input->find_column_id(*predicate_expression->arguments[0]);
-    const auto right_in_right = right_input->find_column_id(*predicate_expression->arguments[1]);
-    if (left_in_left && right_in_right) {
-    //if (true) {
-        ss << table_name_0 << "," << column_name_0 << "," << _output_size(op->input_left())  << ",";
-        ss << table_name_1 << "," << column_name_1 << "," << _output_size(op->input_right()) << ",";
-    } else {
-        ss << table_name_1 << "," << column_name_1 << "," << _output_size(op->input_left())  << ",";
-        ss << table_name_0 << "," << column_name_0 << "," << _output_size(op->input_right()) << ",";
-    }
+      const auto left_table_row_count = _output_size(op->input_left());
+      const auto right_table_row_count = _output_size(op->input_right());
 
+      ss << table_name_0 << "," << column_name_0 << "," << left_table_row_count  << ",";
+      ss << table_name_1 << "," << column_name_1 << "," << right_table_row_count << ",";
 
       ss << perf_data->output_row_count << ",";
       ss << join_node->node_expressions.size() << "," << predicate_condition_to_string.left.at((*operator_predicate).predicate_condition) << ",";
@@ -180,13 +178,73 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
       } else {
         ss << ",0,0,0,0,0";
       }
-      ss << "," << op->description() << "\n";
+      ss << "," << op->description() << ",";
+
+      if (op->type() == OperatorType::JoinHash) {
+        // determine probe and build column
+        bool probe_side_is_left = true;
+        const auto join_op = std::dynamic_pointer_cast<const AbstractJoinOperator>(op);
+        const auto& mode = join_op->mode();
+        if (mode == JoinMode::Semi || mode == JoinMode::Left || mode == JoinMode::AntiNullAsFalse || mode == JoinMode::AntiNullAsTrue) {
+          probe_side_is_left = true;
+        } else if (mode == JoinMode::Right) {
+          probe_side_is_left = false;
+        } else if (mode == JoinMode::Inner) {
+          if (left_table_row_count > right_table_row_count) {
+            probe_side_is_left = true;
+          } else {
+            probe_side_is_left = false;
+          }
+        }
+
+        std::string probe_table;
+        std::string probe_column;
+        size_t probe_table_size;
+        std::string build_table;
+        std::string build_column;
+        size_t build_table_size;
+
+        if (probe_side_is_left) {
+          probe_table = table_name_0;
+          probe_column = column_name_0;
+          build_table = table_name_1;
+          build_column = column_name_1;
+          probe_table_size = left_table_row_count;
+          build_table_size = right_table_row_count;
+        } else {
+          probe_table = table_name_1;
+          probe_column = column_name_1;
+          build_table = table_name_0;
+          build_column = column_name_0;
+          probe_table_size = right_table_row_count;
+          build_table_size = left_table_row_count;
+        }
+
+        ss << build_table << "," << build_column << "," << build_table_size << "," << probe_table << "," << probe_column << "," << probe_table_size << ",";
+
+        // determine whether build or probe column could arrive sorted
+        // sortedness is kept by TableScans, Validates, (Projection, Alias), and SemiJoins with radix_bits = 0
+        bool probe_column_propagates_sortedness = false;
+        bool build_column_propagates_sortedness = false;
+
+        if (probe_side_is_left) {
+          probe_column_propagates_sortedness = _propagates_sortedness(op->input_left());
+          build_column_propagates_sortedness = _propagates_sortedness(op->input_right());
+        } else {
+          probe_column_propagates_sortedness = _propagates_sortedness(op->input_right());
+          build_column_propagates_sortedness = _propagates_sortedness(op->input_left());
+        }
+
+        ss << build_column_propagates_sortedness << "," << probe_column_propagates_sortedness << "\n";
+      } else {
+        // not a hash join -> probe/build terms do not make sense
+        ss << ",,0,,,0,0,0\n";
+      }
 
       // How do we know whether the left_input_rows are actually added to the left table?
       // table_id = _table_name_id_map.left.at(table_name_1);
       // identifier = std::make_pair(table_id, original_column_id_1);
       // update_map(join_map, identifier, perf_data, false);
-
   } else {
     ss << "UNEXPECTED join operator_predicate.has_value()";
     std::cout << op << std::endl;
@@ -224,6 +282,40 @@ void PlanCacheCsvExporter::_process_index_scan(const std::shared_ptr<const Abstr
   }
 }
 
+bool PlanCacheCsvExporter::_propagates_sortedness(const std::shared_ptr<const AbstractOperator>& op) const {
+  bool propagates = true;
+  Assert(op, "operator was null");
+
+  auto current_operator = op;
+
+  // loop ends when we have reached the first node
+  while (current_operator->input_left()) {
+    const auto& type = current_operator->type();
+    if (type == OperatorType::JoinHash) {
+      const auto join_op = std::dynamic_pointer_cast<const JoinHash>(current_operator);
+      Assert(join_op, "Bug");
+
+      const auto& mode = join_op->mode();
+      if (mode != JoinMode::Semi && mode != JoinMode::AntiNullAsFalse && mode != JoinMode::AntiNullAsTrue) {
+        propagates = false;
+        break;
+      }
+
+      if (!join_op->_radix_bits || *join_op->_radix_bits > 0) {
+        propagates = false;
+        break;
+      }
+    } else if (type == OperatorType::TableScan || type == OperatorType::Validate || type == OperatorType::Projection || type == OperatorType::Alias) {
+        // nothing to do, those operators propagate sorted data
+    } else {
+      propagates = false;
+      break;
+    }
+    current_operator = current_operator->input_left();
+  }
+
+  return propagates;
+}
 
 void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash) {
   std::vector<SingleTableScan> table_scans;
