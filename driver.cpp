@@ -125,6 +125,13 @@ void extract_table_meta_data(const std::string folder_name) {
               std::cout << "Comparing" << std::endl;
               if constexpr (std::is_arithmetic_v<ColumnDataType>) {
                 const auto range_filter = attribute_statistics->range_filter;
+
+                // TODO if there is no range filter, assume there are only NULLS. See comment below for reasoning
+                if (!range_filter){
+                  assume_sorted = false;
+                  break;
+                }
+
                 Assert(range_filter, "no range filter despite arithmetic type");
                 const auto& ranges = range_filter->ranges;
                 if (old_max && *old_max > ranges[0].first) {
@@ -134,6 +141,16 @@ void extract_table_meta_data(const std::string folder_name) {
                 old_max = ranges.back().second;
               } else {
                 const auto min_max_filter = attribute_statistics->min_max_filter;
+
+                // TODO find out why some columns do not have a min max filter
+                // TODO I assume its because all values in the segment are NULL
+                // TODO Since the data is not supposed to be sorted, it is unlikely (but possible!)
+                // TODO that a whole segment is NULL. Thus assume there is only NULL, and early exit.
+                if (!min_max_filter) {
+                  assume_sorted = false;
+                  break;
+                }
+
                 Assert(min_max_filter, "no min max filter despite non-arithmetic type");
                 if (old_max && *old_max > min_max_filter->min) {
                   assume_sorted = false;
@@ -223,6 +240,7 @@ void Driver::start() {
     SCALE_FACTOR = 1.0f;
     config->max_runs = 1;
     config->warmup_duration = std::chrono::seconds(0);
+    config->max_duration = std::chrono::seconds(MAX_RUNTIME);
     const std::string query_path = "hyrise/resources/benchmark/tpcds/tpcds-result-reproduction/query_qualification";
     if (!std::filesystem::exists("resources/")) {
       std::cout << "When resources for TPC-DS cannot be found on Linux, create a symlink as a workaround: 'ln -s hyrise/resources resources'." << std::endl;
