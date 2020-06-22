@@ -108,8 +108,8 @@ void Driver::start() {
   config->max_runs = 10;
   config->enable_visualization = false;
   config->cache_binary_tables = true;
-  config->max_duration = std::chrono::seconds(300);
-  config->warmup_duration = std::chrono::seconds(20);
+  config->max_duration = std::chrono::seconds(60);
+  //config->warmup_duration = std::chrono::seconds(20);
 
   constexpr auto USE_PREPARED_STATEMENTS = false;
   auto SCALE_FACTOR = 17.0f;  // later overwritten
@@ -124,7 +124,7 @@ void Driver::start() {
   //  TPC-H
   //
   if (BENCHMARK == "TPC-H") {
-    SCALE_FACTOR = 0.1f;
+    SCALE_FACTOR = 1.f;
     config->max_runs = 10;
     config->warmup_duration = std::chrono::seconds(0);
     // const std::vector<BenchmarkItemID> tpch_query_ids_benchmark = {BenchmarkItemID{5}};
@@ -185,7 +185,7 @@ void Driver::start() {
   //  /JOB
   //
 
-  const std::string folder_name = std::string(BENCHMARK) + "__SF_" + std::to_string(SCALE_FACTOR) + "__RUNS_" + std::to_string(config->max_runs);
+  const std::string folder_name = std::string(BENCHMARK) + "__SF_" + std::to_string(SCALE_FACTOR) + "__RUNS_" + std::to_string(config->max_runs) + "__TIME_" + std::to_string(config->max_duration.count() / 1000000000);
   std::filesystem::create_directories(folder_name);
 
   std::cout << "Exporting table/column/segments meta data." << std::endl;
