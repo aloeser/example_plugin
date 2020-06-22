@@ -192,7 +192,7 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
       // Check if the join predicate has been switched (hence, it differs between LQP and PQP) which is done when
       // table A and B are joined but the join predicate is "flipped" (e.g., b.x = a.x). The effect of flipping is that
       // the predicates are in the order (left/right) as the join input tables are.
-      if (operator_predicate->is_flipped()) {
+      if (!operator_predicate->is_flipped()) {
         ss << left_table_name << "|" << column_name_0 << "|" << left_input_perf_data->output_row_count  << "|";
         ss << right_table_name << "|" << column_name_1 << "|" << right_input_perf_data->output_row_count << "|";
       } else {
