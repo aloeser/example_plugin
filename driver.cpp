@@ -1,6 +1,8 @@
 #include <fstream>
 #include <unordered_set>
 
+#include <boost/algorithm/string.hpp>
+
 #include "driver.hpp"
 #include "plan_cache_csv_exporter.hpp"
 
@@ -47,6 +49,7 @@ const std::unordered_set<std::string> filename_blacklist() {
 }
 
 void extract_table_meta_data(const std::string folder_name) {
+  // TODO: why not use the CSV exporter?
   auto table_to_csv = [](const std::string table_name, const std::string csv_file_name, const bool show_distinct_value_count = false) {
     const auto table = SQLPipelineBuilder{"SELECT * FROM " + table_name}
                           .create_pipeline()
@@ -55,14 +58,16 @@ void extract_table_meta_data(const std::string folder_name) {
 
     const auto column_names = table->column_names();
     for (auto column_id = size_t{0}; column_id < column_names.size(); ++column_id) {
-      output_file << column_names[column_id];
+      auto column_name = column_names[column_id];
+      boost::to_upper(column_name);
+      output_file << column_name;
       if (column_id < (column_names.size() - 1)) {
         output_file << "|";
       }
     }
 
     if (show_distinct_value_count) {
-      output_file << "|distinct_values|is_globally_sorted";
+      output_file << "|DISTINCT_VALUES|IS_GLOBALLY_SORTED";
     }
     output_file << std::endl;
 
@@ -180,7 +185,7 @@ void extract_table_meta_data(const std::string folder_name) {
 
 }  // namespace
 
-const std::string Driver::description() const { return "This driver executes benchmarks and outputs its plan cache to an array of CSV files."; }
+std::string Driver::description() const { return "This driver executes benchmarks and outputs its plan cache to an array of CSV files."; }
 
 void Driver::start() {
   const auto BENCHMARKS = std::vector<std::string>{"TPC-H", "TPC-DS", "JOB"};
@@ -204,12 +209,17 @@ void Driver::start() {
   config->max_runs = 10;
   config->enable_visualization = false;
   config->cache_binary_tables = true;
-  config->max_duration = std::chrono::seconds(300);
-  config->warmup_duration = std::chrono::seconds(20);
+  config->max_duration = std::chrono::seconds(60);
+  //config->warmup_duration = std::chrono::seconds(20);
 
   constexpr auto USE_PREPARED_STATEMENTS = false;
   auto SCALE_FACTOR = 17.0f;  // later overwritten
   const auto MAX_RUNTIME = 60;
+
+
+  // Set caches
+  Hyrise::get().default_pqp_cache = std::make_shared<SQLPhysicalPlanCache>(100'000);
+  Hyrise::get().default_lqp_cache = std::make_shared<SQLLogicalPlanCache>(100'000);
 
 
   //
@@ -221,7 +231,7 @@ void Driver::start() {
     config->warmup_duration = std::chrono::seconds(0);
     config->max_duration = std::chrono::seconds(MAX_RUNTIME);
     // const std::vector<BenchmarkItemID> tpch_query_ids_benchmark = {BenchmarkItemID{5}};
-    // auto item_runner = std::make_ unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR, tpch_query_ids_benchmark);
+    // auto item_runner = std::make_unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR, tpch_query_ids_benchmark);
     auto item_runner = std::make_unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR);
     auto benchmark_runner = std::make_shared<BenchmarkRunner>(
         *config, std::move(item_runner), std::make_unique<TPCHTableGenerator>(SCALE_FACTOR, config), BenchmarkRunner::create_context(*config));
@@ -279,7 +289,7 @@ void Driver::start() {
   //  /JOB
   //
 
-  const std::string folder_name = std::string(BENCHMARK) + "__SF_" + std::to_string(SCALE_FACTOR) + "__RUNS_" + std::to_string(config->max_runs) + "__TIME_" + std::to_string(MAX_RUNTIME);
+  const std::string folder_name = std::string(BENCHMARK) + "__SF_" + std::to_string(SCALE_FACTOR) + "__RUNS_" + std::to_string(config->max_runs) + "__TIME_" + std::to_string(config->max_duration.count() / 1000000000);
   std::filesystem::create_directories(folder_name);
 
   std::cout << "Exporting table/column/segments meta data." << std::endl;
@@ -292,6 +302,8 @@ void Driver::start() {
     std::cerr << "Plan cache is empty." << std::endl;
     exit(17);
   }
+
+  std::cout << "Done." << std::endl;
 }
 
 void Driver::stop() {

@@ -2,11 +2,12 @@
 set(CMAKE_UNITY_BUILD "OFF")
 
 if (${CMAKE_BUILD_TYPE} STREQUAL "Debug")
-    set(HYRISE_DEBUG 1)
+     set(HYRISE_DEBUG 1)
 else()
     set(HYRISE_DEBUG 0)
 endif()
 
+add_definitions(-DHYRISE_DEBUG=${HYRISE_DEBUG})
 
 # Usually, you should not have to touch the following part ##########################################
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)                                                    #
@@ -20,9 +21,11 @@ add_subdirectory(hyrise/)                                                       
 include_directories(                                                                                #
     ${PROJECT_SOURCE_DIR}/hyrise/src/lib/                                                           #
     ${PROJECT_SOURCE_DIR}/hyrise/src/benchmarklib/                                                  #
+    ${PROJECT_SOURCE_DIR}/hyrise/third_party/flat_hash_map                                          #
+    ${PROJECT_SOURCE_DIR}/hyrise/third_party/nlohmann_json/single_include                           #
+    ${PROJECT_SOURCE_DIR}/hyrise/third_party/magic_enum/include                                     #
     ${PROJECT_SOURCE_DIR}/hyrise/third_party/sql-parser/src                                         #
     ${PROJECT_SOURCE_DIR}/hyrise/third_party/cxxopts/include                                        #
-    ${TBB_INCLUDE_DIR}                                                                              #
     ${Boost_INCLUDE_DIRS}                                                                           #
     ${CMAKE_BINARY_DIR}                                                                             #
 )                                                                                                   #
@@ -30,6 +33,7 @@ include_directories(                                                            
 # try to get rid of some TPC-DS unniceties                                                          #
 include_directories(                                                                                #
     SYSTEM                                                                                          #
+    ${TBB_INCLUDE_DIR}                                                                              #
     ${PROJECT_SOURCE_DIR}/hyrise/third_party/                                                       #
 )                                                                                                   #
                                                                                                     #
