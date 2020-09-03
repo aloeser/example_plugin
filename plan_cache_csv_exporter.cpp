@@ -216,7 +216,8 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
 
     if (const auto join_hash_op = dynamic_pointer_cast<const JoinHash>(op)) {
       const auto& join_hash_perf_data = dynamic_cast<const JoinHash::PerformanceData&>(*join_hash_op->performance_data);
-      const auto flipped = join_hash_perf_data.right_input_is_build_side ? "TRUE" : "FALSE";
+      const auto flipped = join_hash_perf_data.right_input_is_build_side ? "FALSE" : "TRUE";
+
       ss << flipped << "|" << join_hash_perf_data.radix_bits << "|";
 
       for (const auto step_name : magic_enum::enum_values<JoinHash::OperatorSteps>()) {

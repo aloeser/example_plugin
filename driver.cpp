@@ -208,7 +208,7 @@ void Driver::start() {
   auto config = std::make_shared<BenchmarkConfig>(BenchmarkConfig::get_default_config());
   config->max_runs = 10;
   config->enable_visualization = false;
-  config->cache_binary_tables = true;
+  config->cache_binary_tables = false;
   config->max_duration = std::chrono::seconds(60);
   //config->warmup_duration = std::chrono::seconds(20);
 
@@ -236,6 +236,10 @@ void Driver::start() {
     auto benchmark_runner = std::make_shared<BenchmarkRunner>(
         *config, std::move(item_runner), std::make_unique<TPCHTableGenerator>(SCALE_FACTOR, config), BenchmarkRunner::create_context(*config));
     Hyrise::get().benchmark_runner = benchmark_runner;
+
+    const std::filesystem::path plugin_path("/home/Alexander.Loeser/example_plugin/build-release/lib/libhyriseClusteringPlugin.so");
+    Hyrise::get().plugin_manager.load_plugin(plugin_path);
+
     benchmark_runner->run();
   }
   //
@@ -261,6 +265,10 @@ void Driver::start() {
     auto benchmark_runner = std::make_shared<BenchmarkRunner>(*config, std::move(query_generator), std::move(table_generator),
                                                               opossum::BenchmarkRunner::create_context(*config));
     Hyrise::get().benchmark_runner = benchmark_runner;
+
+    const std::filesystem::path plugin_path("/home/Alexander.Loeser/example_plugin/build-release/lib/libhyriseClusteringPlugin.so");
+    Hyrise::get().plugin_manager.load_plugin(plugin_path);
+
     benchmark_runner->run();
   }
   //
