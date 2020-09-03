@@ -14,6 +14,7 @@
 #include "operators/aggregate_hash.hpp"
 #include "operators/operator_join_predicate.hpp"
 #include "operators/operator_scan_predicate.hpp"
+#include "operators/table_scan.hpp"
 #include "sql/sql_pipeline_builder.hpp"
 #include "sql/sql_plan_cache.hpp"
 #include "storage/table.hpp"
@@ -55,21 +56,21 @@ namespace opossum {
 
 PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name) : _sm{Hyrise::get().storage_manager}, _export_folder_name{export_folder_name}, _table_scans{}, _projections{} {
   std::ofstream joins_csv;
-  std::ofstream validates_csv;
+  std::ofstream general_operators_csv;
   std::ofstream aggregates_csv;
 
   joins_csv.open(_export_folder_name + "/joins.csv");
-  validates_csv.open(_export_folder_name + "/validates.csv");
+  general_operators_csv.open(_export_folder_name + "/general_operators.csv");
   aggregates_csv.open(_export_folder_name + "/aggregates.csv");
 
-  joins_csv << "QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|JOIN_MODE|LEFT_TABLE_NAME|LEFT_COLUMN_NAME|LEFT_TABLE_ROW_COUNT|RIGHT_TABLE_NAME|RIGHT_COLUMN_NAME|RIGHT_TABLE_ROW_COUNT|OUTPUT_ROWS|PREDICATE_COUNT|PRIMARY_PREDICATE|IS_FLIPPED|RADIX_BITS|";
+  joins_csv << "OPERATOR_TYPE|QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|JOIN_MODE|LEFT_TABLE_NAME|LEFT_COLUMN_NAME|LEFT_TABLE_CHUNK_COUNT|LEFT_TABLE_ROW_COUNT|LEFT_COLUMN_TYPE|RIGHT_TABLE_NAME|RIGHT_COLUMN_NAME|RIGHT_TABLE_CHUNK_COUNT|RIGHT_TABLE_ROW_COUNT|RIGHT_COLUMN_TYPE|OUTPUT_CHUNK_COUNT|OUTPUT_ROW_COUNT|PREDICATE_COUNT|PRIMARY_PREDICATE|IS_FLIPPED|RADIX_BITS|";
   for (const auto step_name : magic_enum::enum_names<JoinHash::OperatorSteps>()) {
     const auto step_name_str = std::string{step_name};
     joins_csv << camel_to_csv_row_title(step_name_str) << "_NS|";
   }
   joins_csv << "RUNTIME_NS|DESCRIPTION\n";
-  validates_csv << "QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|INPUT_ROWS|OUTPUT_ROWS|RUNTIME_NS\n";
-  aggregates_csv << "QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|GROUP_BY_COLUMN_COUNT|AGGREGATE_COLUMN_COUNT|INPUT_ROWS|OUTPUT_ROWS|";
+  general_operators_csv << "OPERATOR_TYPE|QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|INPUT_CHUNK_COUNT|INPUT_ROW_COUNT|OUTPUT_CHUNK_COUNT|OUTPUT_ROW_COUNT|RUNTIME_NS\n";
+  aggregates_csv << "OPERATOR_TYPE|QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|GROUP_BY_COLUMN_COUNT|AGGREGATE_COLUMN_COUNT|INPUT_CHUNK_COUNT|INPUT_ROW_COUNT|OUTPUT_CHUNK_COUNT|OUTPUT_ROW_COUNT|";
   for (const auto step_name : magic_enum::enum_names<AggregateHash::OperatorSteps>()) {
     const auto step_name_str = std::string{step_name};
     aggregates_csv << camel_to_csv_row_title(step_name_str) << "_NS|";
@@ -77,7 +78,7 @@ PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name)
   aggregates_csv << "RUNTIME_NS|DESCRIPTION\n";
 
   joins_csv.close();
-  validates_csv.close();
+  general_operators_csv.close();
   aggregates_csv.close();
 }
 
@@ -139,120 +140,112 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
                                                                          *node->left_input(), *node->right_input());
 
   std::stringstream ss;
-  ss << query_hex_hash << "|" << get_operator_hash(op) << "|" << get_operator_hash(op->left_input()) << "|"
+  ss << "JOIN|" << query_hex_hash << "|" << get_operator_hash(op) << "|" << get_operator_hash(op->left_input()) << "|"
      << get_operator_hash(op->right_input()) << "|" << join_mode_to_string.left.at(join_node->join_mode) << "|";
   if (operator_predicate.has_value()) {
     const auto predicate_expression = std::dynamic_pointer_cast<const AbstractPredicateExpression>(join_node->node_expressions[0]);
-    std::string left_table_name, right_table_name;
-    ColumnID left_original_column_id, right_original_column_id;
+    std::string left_table_name{};
+    std::string right_table_name{};
+    ColumnID left_original_column_id{};
+    ColumnID right_original_column_id{};
+    std::string left_column_type{};
+    std::string right_column_type{};
 
-      const auto first_predicate_expression = predicate_expression->arguments[0];
-      if (first_predicate_expression->type == ExpressionType::LQPColumn) {
-        const auto left_column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(first_predicate_expression);
-        left_original_column_id = left_column_expression->original_column_id;
+    const auto first_predicate_expression = predicate_expression->arguments[0];
+    if (first_predicate_expression->type == ExpressionType::LQPColumn) {
+      const auto left_column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(first_predicate_expression);
+      left_original_column_id = left_column_expression->original_column_id;
 
-        const auto original_node_0 = left_column_expression->original_node.lock();
-        if (original_node_0->type == LQPNodeType::StoredTable) {
-          const auto stored_table_node_0 = std::dynamic_pointer_cast<const StoredTableNode>(original_node_0);
-          left_table_name = stored_table_node_0->table_name;
+      const auto original_node_0 = left_column_expression->original_node.lock();
+      if (original_node_0->type == LQPNodeType::StoredTable) {
+        const auto stored_table_node_0 = std::dynamic_pointer_cast<const StoredTableNode>(original_node_0);
+        left_table_name = stored_table_node_0->table_name;
+
+        if (original_node_0 == node->left_input()) {
+          left_column_type = "DATA";
+        } else {
+          left_column_type = "REFERENCE";
         }
       }
+    }
 
-      const auto second_predicate_expression = predicate_expression->arguments[1];
-      if (second_predicate_expression->type == ExpressionType::LQPColumn) {
-        const auto right_column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(second_predicate_expression);
-        right_original_column_id = right_column_expression->original_column_id;
-        
-        const auto original_node_1 = right_column_expression->original_node.lock();
-        if (original_node_1->type == LQPNodeType::StoredTable) {
-          const auto stored_table_node_1 = std::dynamic_pointer_cast<const StoredTableNode>(original_node_1);
-          right_table_name = stored_table_node_1->table_name;
+    const auto second_predicate_expression = predicate_expression->arguments[1];
+    if (second_predicate_expression->type == ExpressionType::LQPColumn) {
+      const auto right_column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(second_predicate_expression);
+      right_original_column_id = right_column_expression->original_column_id;
+      
+      const auto original_node_1 = right_column_expression->original_node.lock();
+      if (original_node_1->type == LQPNodeType::StoredTable) {
+        const auto stored_table_node_1 = std::dynamic_pointer_cast<const StoredTableNode>(original_node_1);
+        right_table_name = stored_table_node_1->table_name;
+
+        if (original_node_1 == node->right_input()) {
+          right_column_type = "DATA";
+        } else {
+          right_column_type = "REFERENCE";
         }
       }
+    }
 
-      std::string column_name_0, column_name_1;
-      // In cases where the join partner is not a column, we fall back to empty column names.
-      // Exemplary query is the rewrite of TPC-H Q2 where `min(ps_supplycost)` is joined with `ps_supplycost`.
-      if (left_table_name != "") {
-        const auto sm_table_0 = _sm.get_table(left_table_name);
-        column_name_0 = sm_table_0->column_names()[left_original_column_id];
+    std::string column_name_0, column_name_1;
+    // In cases where the join partner is not a column, we fall back to empty column names.
+    // Exemplary query is the rewrite of TPC-H Q2 where `min(ps_supplycost)` is joined with `ps_supplycost`.
+    if (left_table_name != "") {
+      const auto sm_table_0 = _sm.get_table(left_table_name);
+      column_name_0 = sm_table_0->column_names()[left_original_column_id];
+    }
+    if (right_table_name != "") {
+      const auto sm_table_1 = _sm.get_table(right_table_name);
+      column_name_1 = sm_table_1->column_names()[right_original_column_id];
+    }
+
+    auto description = op->description();
+    description.erase(std::remove(description.begin(), description.end(), '\n'), description.end());
+    description.erase(std::remove(description.begin(), description.end(), '"'), description.end());
+
+    const auto& left_input_perf_data = op->left_input()->performance_data;
+    const auto& right_input_perf_data = op->right_input()->performance_data;
+
+    // Check if the join predicate has been switched (hence, it differs between LQP and PQP) which is done when
+    // table A and B are joined but the join predicate is "flipped" (e.g., b.x = a.x). The effect of flipping is that
+    // the predicates are in the order (left/right) as the join input tables are.
+    if (!operator_predicate->is_flipped()) {
+      ss << left_table_name << "|" << column_name_0 << "|" << left_input_perf_data->output_chunk_count
+         << "|" << left_input_perf_data->output_row_count << "|" << left_column_type << "|";
+      ss << right_table_name << "|" << column_name_1 << "|" << right_input_perf_data->output_chunk_count
+         << "|" << right_input_perf_data->output_row_count << "|" << right_column_type << "|";
+    } else {
+      ss << right_table_name << "|" << column_name_1 << "|" << left_input_perf_data->output_chunk_count
+         << "|" << left_input_perf_data->output_row_count << "|" << right_column_type << "|";
+      ss << left_table_name << "|" << column_name_0 << "|" << right_input_perf_data->output_chunk_count
+         << "|" << right_input_perf_data->output_row_count << "|" << left_column_type << "|";
+    }
+
+
+    const auto& perf_data = op->performance_data;
+    ss << perf_data->output_chunk_count << "|" << perf_data->output_row_count << "|";
+    ss << join_node->node_expressions.size() << "|" << predicate_condition_to_string.left.at((*operator_predicate).predicate_condition) << "|";
+    if (const auto join_hash_op = dynamic_pointer_cast<const JoinHash>(op)) {
+      const auto& join_hash_perf_data = dynamic_cast<const JoinHash::PerformanceData&>(*join_hash_op->performance_data);
+      const auto build_and_probe_side_flipped = join_hash_perf_data.right_input_is_build_side ? "TRUE" : "FALSE";
+      ss << build_and_probe_side_flipped << "|" << join_hash_perf_data.radix_bits << "|";
+
+      for (const auto step_name : magic_enum::enum_values<JoinHash::OperatorSteps>()) {
+        ss << join_hash_perf_data.get_step_runtime(step_name).count() << "|";
       }
-      if (right_table_name != "") {
-        const auto sm_table_1 = _sm.get_table(right_table_name);
-        column_name_1 = sm_table_1->column_names()[right_original_column_id];
+    } else {
+      ss << "FALSE|NULL|";
+      for (auto index = size_t{0}; index < magic_enum::enum_count<JoinHash::OperatorSteps>(); ++index) {
+        ss << "NULL|";
       }
-
-      auto description = op->description();
-      description.erase(std::remove(description.begin(), description.end(), '\n'), description.end());
-      description.erase(std::remove(description.begin(), description.end(), '"'), description.end());
-
-      const auto& left_input_perf_data = op->left_input()->performance_data;
-      const auto& right_input_perf_data = op->right_input()->performance_data;
-
-      // Check if the join predicate has been switched (hence, it differs between LQP and PQP) which is done when
-      // table A and B are joined but the join predicate is "flipped" (e.g., b.x = a.x). The effect of flipping is that
-      // the predicates are in the order (left/right) as the join input tables are.
-      if (!operator_predicate->is_flipped()) {
-        ss << left_table_name << "|" << column_name_0 << "|" << left_input_perf_data->output_row_count  << "|";
-        ss << right_table_name << "|" << column_name_1 << "|" << right_input_perf_data->output_row_count << "|";
-      } else {
-        ss << right_table_name << "|" << column_name_1 << "|" << left_input_perf_data->output_row_count  << "|";
-        ss << left_table_name << "|" << column_name_0 << "|" << right_input_perf_data->output_row_count << "|";
-      }
-
-      const auto& perf_data = op->performance_data;
-      ss << perf_data->output_row_count << "|";
-      ss << join_node->node_expressions.size() << "|" << predicate_condition_to_string.left.at((*operator_predicate).predicate_condition) << "|";
-      if (const auto join_hash_op = dynamic_pointer_cast<const JoinHash>(op)) {
-        const auto& join_hash_perf_data = dynamic_cast<const JoinHash::PerformanceData&>(*join_hash_op->performance_data);
-        const auto flipped = join_hash_perf_data.right_input_is_build_side ? "TRUE" : "FALSE";
-        ss << flipped << "|" << join_hash_perf_data.radix_bits << "|";
-
-        for (const auto step_name : magic_enum::enum_values<JoinHash::OperatorSteps>()) {
-          ss << join_hash_perf_data.get_step_runtime(step_name).count() << "|";
-        }
-      } else {
-        ss << "FALSE|NULL|";
-        for (auto index = size_t{0}; index < magic_enum::enum_count<JoinHash::OperatorSteps>(); ++index) {
-          ss << "NULL|";
-        }
-      }
-      ss << perf_data->walltime.count() << "|" << description << "\n";
+    }
+    ss << perf_data->walltime.count() << "|" << description << "\n";
   } else {
     ss << "UNEXPECTED join operator_predicate.has_value()";
     std::cout << op << std::endl;
   }
 
   return ss.str();
-}
-
-void PlanCacheCsvExporter::_process_index_scan(const std::shared_ptr<const AbstractOperator>& op,
-                                               const std::string& query_hex_hash) {
-  const auto node = op->lqp_node;
-  const auto predicate_node = std::dynamic_pointer_cast<const PredicateNode>(node);
-  const auto operator_predicates = OperatorScanPredicate::from_expression(*predicate_node->predicate(), *node);
-
-  // TODO(anyone): I never used an index scan, so I am not sure if I am handling it right.
-  std::cout << "Unhandled operation ..." << std::endl;
-  if (operator_predicates->size() < 2) {
-    for (const auto& el : node->node_expressions) {
-      visit_expression(el, [&](const auto& expression) {
-        if (expression->type == ExpressionType::LQPColumn) {
-          const auto column_expression = std::dynamic_pointer_cast<LQPColumnExpression>(expression);
-          const auto original_node = column_expression->original_node.lock();
-
-          if (original_node->type == LQPNodeType::StoredTable) {
-            const auto stored_table_node = std::dynamic_pointer_cast<const StoredTableNode>(original_node);
-            const auto& table_name = stored_table_node->table_name;
-
-            const auto& left_input_perf_data = op->left_input()->performance_data;
-            std::cout << table_name << "|" << left_input_perf_data->output_row_count << std::endl;
-          }
-        }
-        return ExpressionVisitation::VisitArguments;
-      });
-    }
-  }
 }
 
 void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash) {
@@ -282,6 +275,13 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
         const auto stored_table_node = std::dynamic_pointer_cast<const StoredTableNode>(original_node);
         const auto& table_name = stored_table_node->table_name;
 
+        auto scan_predicate_condition = std::string{"Unknown"};
+        const auto operator_scan_predicates = OperatorScanPredicate::from_expression(*predicate, *stored_table_node);
+        if (operator_scan_predicates->size() == 1) {
+          const auto condition = (*operator_scan_predicates)[0].predicate_condition;
+          scan_predicate_condition = magic_enum::enum_name(condition);
+        }
+
         const auto original_column_id = column_expression->original_column_id;
         const auto sm_table = _sm.get_table(table_name);
         std::string column_name = "";
@@ -291,18 +291,27 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
           column_name = "COUNT(*)";
         }
 
+        const auto table_scan_op = dynamic_pointer_cast<const TableScan>(op);
+        Assert(table_scan_op, "Unexpected non-table-scan operators");
+        const auto& operator_perf_data = dynamic_cast<const TableScan::PerformanceData&>(*table_scan_op->performance_data);
+
         auto description = op->description();
         description.erase(std::remove(description.begin(), description.end(), '\n'), description.end());
         description.erase(std::remove(description.begin(), description.end(), '"'), description.end());
 
-        const auto& perf_data = op->performance_data;
         const auto& left_input_perf_data = op->left_input()->performance_data;
 
         table_scans.emplace_back(SingleTableScan{query_hex_hash, get_operator_hash(op),
                                                  get_operator_hash(op->left_input()), "NULL", column_type, table_name,
-                                                 column_name, left_input_perf_data->output_row_count,
-                                                 perf_data->output_row_count,
-                                                 static_cast<size_t>(perf_data->walltime.count()), description});
+                                                 column_name, scan_predicate_condition,
+                                                 operator_perf_data.chunk_scans_skipped,
+                                                 operator_perf_data.chunk_scans_sorted,
+                                                 left_input_perf_data->output_chunk_count,
+                                                 left_input_perf_data->output_row_count,
+                                                 operator_perf_data.output_chunk_count,
+                                                 operator_perf_data.output_row_count,
+                                                 static_cast<size_t>(operator_perf_data.walltime.count()),
+                                                 description});
       }
     }
     return ExpressionVisitation::VisitArguments;
@@ -325,19 +334,24 @@ void PlanCacheCsvExporter::_process_get_table(const std::shared_ptr<const Abstra
 
   get_tables.emplace_back(SingleGetTable{query_hex_hash, get_operator_hash(op), "NULL", "NULL",
                                           get_table_op->table_name(), get_table_op->pruned_chunk_ids().size(),
-                                          get_table_op->pruned_column_ids().size(), perf_data->output_row_count,
+                                          get_table_op->pruned_column_ids().size(), perf_data->output_chunk_count,
+                                          perf_data->output_row_count,
                                           static_cast<size_t>(perf_data->walltime.count()), description});
 
   _get_tables.instances.insert(_get_tables.instances.end(), get_tables.begin(), get_tables.end());
 }
 
-std::string PlanCacheCsvExporter::_process_validate(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash) {
+std::string PlanCacheCsvExporter::_process_general_operator(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash) {
   const auto& perf_data = op->performance_data;
   const auto& left_input_perf_data = op->left_input()->performance_data;
 
   // TODO(Martin): Do we need the table name?
+  const auto type_name = std::string{magic_enum::enum_name(op->type())};
   std::stringstream ss;
-  ss << query_hex_hash << "|" << left_input_perf_data->output_row_count << "|" << perf_data->output_row_count << "|" << perf_data->walltime.count() << "\n";
+  ss << camel_to_csv_row_title(type_name) << "|" << query_hex_hash << "|" << get_operator_hash(op) << "|" << get_operator_hash(op->left_input())
+     << "|NULL|" << left_input_perf_data->output_chunk_count << "|" << left_input_perf_data->output_chunk_count
+     << "|" << perf_data->output_chunk_count << "|" << perf_data->output_row_count << "|"
+     << perf_data->walltime.count() << "\n";
 
   return ss.str();
 }
@@ -347,11 +361,6 @@ std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const
   const auto aggregate_node = std::dynamic_pointer_cast<const AggregateNode>(node);
 
   std::stringstream ss;
-  std::ostringstream op_description_ostream;
-  op_description_ostream << *op;
-  std::stringstream agg_hex_hash;
-  agg_hex_hash << std::hex << std::hash<std::string>{}(op_description_ostream.str());
-
   for (const auto& el : aggregate_node->node_expressions) {
     // TODO: ensure we do not traverse too deep here, isn't the loop sufficient?
     visit_expression(el, [&](const auto& expression) {
@@ -360,7 +369,8 @@ std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const
         const auto original_node = column_expression->original_node.lock();
 
         if (original_node->type == LQPNodeType::StoredTable) {
-          ss << query_hex_hash << "|" << get_operator_hash(op->left_input()) << "|NULL|" << agg_hex_hash.str() << "|";
+          ss << "AGGREGATE|" <<query_hex_hash << "|" << get_operator_hash(op) << "|"
+             << get_operator_hash(op->left_input()) << "|NULL|";
           if (original_node == node->left_input()) {
             ss << "DATA|";
           } else {
@@ -375,10 +385,6 @@ std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const
           const auto& perf_data = op->performance_data;
           const auto& left_input_perf_data = op->left_input()->performance_data;
 
-          const auto node_expression_count = aggregate_node->node_expressions.size();
-          const auto group_by_column_count = aggregate_node->aggregate_expressions_begin_idx;
-          ss << group_by_column_count << "|" << (node_expression_count - group_by_column_count) << "|";
-
           const auto sm_table = _sm.get_table(table_name);
           std::string column_name = "";
           if (original_column_id != INVALID_COLUMN_ID) {
@@ -386,8 +392,15 @@ std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const
           } else {
             column_name = "COUNT(*)";
           }
-          ss << column_name << "|" << left_input_perf_data->output_row_count << "|";
-          ss << perf_data->output_row_count << "|";
+          ss << column_name << "|";
+
+          const auto node_expression_count = aggregate_node->node_expressions.size();
+          const auto group_by_column_count = aggregate_node->aggregate_expressions_begin_idx;
+          ss << group_by_column_count << "|" << (node_expression_count - group_by_column_count) << "|";
+
+          ss << left_input_perf_data->output_chunk_count << "|"
+             << left_input_perf_data->output_row_count << "|" << perf_data->output_chunk_count << "|"
+             << perf_data->output_row_count << "|";
           if (const auto aggregate_hash_op = dynamic_pointer_cast<const AggregateHash>(op)) {
             const auto& operator_perf_data = dynamic_cast<const OperatorPerformanceData<AggregateHash::OperatorSteps>&>(*aggregate_hash_op->performance_data);
             for (const auto step_name : magic_enum::enum_values<AggregateHash::OperatorSteps>()) {
@@ -441,7 +454,8 @@ void PlanCacheCsvExporter::_process_projection(const std::shared_ptr<const Abstr
 
           projections.emplace_back(SingleProjection{query_hex_hash, get_operator_hash(op),
             get_operator_hash(op->left_input()), "NULL", column_type, table_name,
-            column_name, left_input_perf_data->output_row_count, perf_data->output_row_count,
+            column_name, left_input_perf_data->output_chunk_count, left_input_perf_data->output_row_count,
+            perf_data->output_chunk_count, perf_data->output_row_count,
             static_cast<size_t>(perf_data->walltime.count()), description});
         }
       }
@@ -479,11 +493,11 @@ void PlanCacheCsvExporter::_process_projection(const std::shared_ptr<const Abstr
 void PlanCacheCsvExporter::_process_pqp(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash,
                                         std::unordered_set<std::shared_ptr<const AbstractOperator>>& visited_pqp_nodes) {
   std::ofstream joins_csv;
-  std::ofstream validates_csv;
+  std::ofstream general_operators_csv;
   std::ofstream aggregates_csv;
 
   joins_csv.open(_export_folder_name + "/joins.csv", std::ios_base::app);
-  validates_csv.open(_export_folder_name + "/validates.csv", std::ios_base::app);
+  general_operators_csv.open(_export_folder_name + "/general_operators.csv", std::ios_base::app);
   aggregates_csv.open(_export_folder_name + "/aggregates.csv", std::ios_base::app);
 
   // TODO(anyone): handle diamonds?
@@ -494,15 +508,14 @@ void PlanCacheCsvExporter::_process_pqp(const std::shared_ptr<const AbstractOper
     _process_get_table(op, query_hex_hash);
   } else if (op->type() == OperatorType::JoinHash || op->type() == OperatorType::JoinNestedLoop || op->type() == OperatorType::JoinSortMerge) {
     joins_csv << _process_join(op, query_hex_hash);
-  } else if (op->type() == OperatorType::IndexScan) {
-    _process_index_scan(op, query_hex_hash);
-  } else if (op->type() == OperatorType::Validate) {
-    validates_csv << _process_validate(op, query_hex_hash);
   } else if (op->type() == OperatorType::Aggregate) {
     aggregates_csv << _process_aggregate(op, query_hex_hash);
   } else if (op->type() == OperatorType::Projection) {
     _process_projection(op, query_hex_hash);
+  } else if (op->type() == OperatorType::CreateView || op->type() == OperatorType::DropView) {
+    // Both make problems when hashing their descriptions.
   } else {
+    general_operators_csv << _process_general_operator(op, query_hex_hash);
   }
 
   visited_pqp_nodes.insert(op);
