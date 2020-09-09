@@ -276,7 +276,7 @@ void Driver::start() {
   //  TPC-H
   //
   if (BENCHMARK == "TPC-H") {
-    SCALE_FACTOR = 1.0f;
+    SCALE_FACTOR = 10.f;
     config->max_runs = 10;
     config->warmup_duration = std::chrono::seconds(0);
     config->max_duration = std::chrono::seconds(MAX_RUNTIME);
