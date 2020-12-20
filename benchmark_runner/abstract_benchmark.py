@@ -4,11 +4,20 @@ class AbstractBenchmark:
   def name(self):
     raise NotImplementedError()
 
+  def visualization_pattern(self):
+    raise NotImplementedError()
+
+  def pretty_name(self):
+    raise NotImplementedError()
+
   def exec_path(self):
     raise NotImplementedError()
 
   def result_path(self):
     raise NotImplementedError()
+
+  def max_runs(self):
+    return NotImplementedError()
 
   def time(self):
     raise NotImplementedError()

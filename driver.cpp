@@ -12,6 +12,7 @@
 #include "file_based_benchmark_item_runner.hpp"
 #include "file_based_table_generator.hpp"
 #include "hyrise.hpp"
+#include "operators/import.hpp"
 #include "statistics/statistics_objects/abstract_histogram.hpp"
 #include "statistics/statistics_objects/min_max_filter.hpp"
 #include "statistics/statistics_objects/range_filter.hpp"
@@ -276,10 +277,10 @@ void Driver::start() {
   //  TPC-H
   //
   if (BENCHMARK == "TPC-H") {
-    SCALE_FACTOR = 10.f;
+    SCALE_FACTOR = 1.f;
     config->max_runs = 10;
     config->warmup_duration = std::chrono::seconds(0);
-    config->max_duration = std::chrono::seconds(MAX_RUNTIME);
+    config->max_duration = std::chrono::seconds(5000);
     // const std::vector<BenchmarkItemID> tpch_query_ids_benchmark = {BenchmarkItemID{5}};
     // auto item_runner = std::make_unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR, tpch_query_ids_benchmark);
     auto item_runner = std::make_unique<TPCHBenchmarkItemRunner>(config, USE_PREPARED_STATEMENTS, SCALE_FACTOR);
@@ -287,7 +288,7 @@ void Driver::start() {
         *config, std::move(item_runner), std::make_unique<TPCHTableGenerator>(SCALE_FACTOR, config), BenchmarkRunner::create_context(*config));
     Hyrise::get().benchmark_runner = benchmark_runner;
 
-    const std::filesystem::path plugin_path("/home/Alexander.Loeser/example_plugin/build-release/lib/libhyriseClusteringPlugin.so");
+    const std::filesystem::path plugin_path("/home/Alexander.Loeser/mastersthesis/example_plugin/build-release/lib/libhyriseClusteringPlugin.so");
     Hyrise::get().plugin_manager.load_plugin(plugin_path);
 
     benchmark_runner->run();
@@ -301,7 +302,7 @@ void Driver::start() {
   //  TPC-DS
   //
   else if (BENCHMARK == "TPC-DS") {
-    SCALE_FACTOR = 1.0f;
+    SCALE_FACTOR = 10.f;
     config->max_runs = 1;
     config->warmup_duration = std::chrono::seconds(0);
     config->max_duration = std::chrono::seconds(MAX_RUNTIME);
@@ -311,10 +312,26 @@ void Driver::start() {
     }
 
     auto query_generator = std::make_unique<FileBasedBenchmarkItemRunner>(config, query_path, filename_blacklist());
-    auto table_generator = std::make_unique<TpcdsTableGenerator>(SCALE_FACTOR, config);
+    auto table_generator = std::make_unique<TPCDSTableGenerator>(SCALE_FACTOR, config);
     auto benchmark_runner = std::make_shared<BenchmarkRunner>(*config, std::move(query_generator), std::move(table_generator),
                                                               opossum::BenchmarkRunner::create_context(*config));
     Hyrise::get().benchmark_runner = benchmark_runner;
+
+    std::vector<std::string> shuffled_tables {"store_sales"};
+    for (const auto& table_name : shuffled_tables) {
+      auto importer = std::make_shared<Import>("shuffled_" + table_name + ".csv", table_name);
+      std::cout << "Replacing " << table_name << " with a shuffled version.." << std::flush;
+      importer->execute();
+      auto table = Hyrise::get().storage_manager.get_table(table_name);
+      for (ChunkID chunk_id{0}; chunk_id < table->chunk_count(); chunk_id++) {
+        const auto& chunk = table->get_chunk(chunk_id);
+        if (chunk && chunk->is_mutable()) {
+          chunk->finalize();
+        }
+      }
+      //ChunkEncoder::encode_all_chunks(Hyrise::get().storage_manager.get_table(table_name), EncodingType::Dictionary);
+      std::cout << " done" << std::endl;
+    }
 
     const std::filesystem::path plugin_path("/home/Alexander.Loeser/example_plugin/build-release/lib/libhyriseClusteringPlugin.so");
     Hyrise::get().plugin_manager.load_plugin(plugin_path);
