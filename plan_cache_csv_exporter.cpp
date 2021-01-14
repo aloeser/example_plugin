@@ -349,11 +349,11 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
   //Assert(copied_table, "we cannot have no input");
 
 
-  // Skip predicates that occur after joins
+  // Skip predicates that occur after aggregates
   auto current_op = op->left_input();
   while (current_op->left_input()) {
-    // we are not interested in predicates after joins
-    if (current_op->type() == OperatorType::JoinHash ||
+    // we are not interested in predicates after aggregate
+    if (current_op->type() == OperatorType::Aggregate ||
         current_op->type() == OperatorType::JoinIndex ||
         current_op->type() == OperatorType::JoinNestedLoop ||
         current_op->type() == OperatorType::JoinSortMerge ||
@@ -361,8 +361,31 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
       std::cout << "SKIPPED because the scan happened on a " << current_op->description() << std::endl;
       return;
     }
-    std::cout << "walking down the pqp, ignoring a " << current_op->description() << std::endl;
-    current_op = current_op->left_input();
+
+    if (current_op->type() == OperatorType::JoinHash) {
+      const auto join_hash = dynamic_pointer_cast<const JoinHash>(current_op);
+      Assert(join_hash, "not a JoinHash");
+      const auto& join_hash_perf_data = dynamic_cast<const JoinHash::PerformanceData&>(*join_hash->performance_data);
+      if (join_hash->mode() == JoinMode::Semi) {
+        //  && join_hash_perf_data.radix_bits == 0
+        // TODO: I think we want all scans to better estimate pruning effects on joins, but this requires some additional field to log whether data can arrive sorted
+
+        std::cout << "walking down the pqp, ignoring a " << current_op->description() << std::endl;
+        if (join_hash_perf_data.right_input_is_build_side) {
+          current_op = current_op->left_input();
+        } else {
+          current_op = current_op->right_input();
+        }
+      } else {
+        // Other
+        std::cout << "SKIPPED because the scan happened on a non-semi 0 radix bit hash join: " << current_op->description() << std::endl;
+        return;
+      }
+    } else {
+      // If current_op is not a join, we should be able to simply go left
+      std::cout << "walking down the pqp, ignoring a " << current_op->description() << std::endl;
+      current_op = current_op->left_input();
+    }
   }
   Assert(current_op, "that went too far down the pqp");
   //auto input_table = std::const_pointer_cast<AbstractOperator>(copied_table);
@@ -371,7 +394,8 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
   //Assert(!input_table->transaction_context_is_set(), "should not have a transaction context");
   //input_table->execute();
 
-  const auto original_get_table = _get_table_operator_for_table_scan(op);
+  const auto original_get_table = dynamic_pointer_cast<const GetTable>(current_op);
+  Assert(original_get_table, "PQP did not start with a GetTable");
 
   //copied_scan->set_input_left(input_table);
   //copied_scan->reset_transaction_context();

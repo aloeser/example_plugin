@@ -44,8 +44,13 @@ def run_benchmark(benchmark, config_name, chunk_size):
 
   if not os.path.exists(stats_path):
     os.makedirs(stats_path)
+  
+  # delete old statistics for this configuration
+  p = Popen(
+        ["rm", "-r", stats_path + "/" + config_name]
+      )
+  p.wait()
 
-  import os
   os.rename(generated_stats_path, stats_path + "/" + config_name)
 
 
