@@ -167,7 +167,7 @@ void extract_table_meta_data(const std::string folder_name) {
             }
           }
 
-          if (benchmark_table->chunk_count() <= 1 || distinct_value_count <= 1) {
+          if (benchmark_table->chunk_count() <= 0 || distinct_value_count <= 1) {
             assume_sorted = false;
           }
 

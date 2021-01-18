@@ -79,6 +79,7 @@ struct SingleTableScan {
 //  size_t single_runtime_ns{};
 
   std::string get_table_hash{};
+  uint64_t operator_id;
 
   std::vector<std::string> string_vector() const {
     std::vector<std::string> result;
@@ -104,13 +105,14 @@ struct SingleTableScan {
 //    result.emplace_back(std::to_string(single_output_rows));
 //    result.emplace_back(std::to_string(single_runtime_ns));
     result.emplace_back(wrap_string(get_table_hash));
+    result.emplace_back(std::to_string(operator_id));
 
     return result;
   }
 };
 
 struct WorkloadTableScans {
-  std::string csv_header{"OPERATOR_TYPE|QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|PREDICATE_CONDITION|SCANS_SKIPPED|SCANS_SORTED|INPUT_CHUNK_COUNT|INPUT_ROW_COUNT|OUTPUT_CHUNK_COUNT|OUTPUT_ROW_COUNT|RUNTIME_NS|DESCRIPTION|GET_TABLE_HASH"};
+  std::string csv_header{"OPERATOR_TYPE|QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|PREDICATE_CONDITION|SCANS_SKIPPED|SCANS_SORTED|INPUT_CHUNK_COUNT|INPUT_ROW_COUNT|OUTPUT_CHUNK_COUNT|OUTPUT_ROW_COUNT|RUNTIME_NS|DESCRIPTION|GET_TABLE_HASH|OPERATOR_ID"};
   std::vector<SingleTableScan> instances;
 };
 
@@ -173,6 +175,7 @@ class PlanCacheCsvExporter {
   void _process_projection(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);
   std::string _process_join(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);
   bool _propagates_sortedness(const std::shared_ptr<const AbstractOperator>& op) const;
+  bool _data_arrives_ordered(const std::shared_ptr<const AbstractOperator>& op, const std::string& table_name) const;
 
   const std::shared_ptr<const AbstractOperator> _get_table_operator_for_table_scan(const std::shared_ptr<const AbstractOperator> table_scan) const;
   void _process_pqp(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash,

@@ -74,7 +74,7 @@ PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name)
   }
 
   joins_csv << "RUNTIME_NS|DESCRIPTION|";
-  joins_csv << "PROBE_SORTED|BUILD_SORTED|PROBE_SIDE|BUILD_SIDE\n";
+  joins_csv << "BUILD_SORTED|PROBE_SORTED|PROBE_SIDE|BUILD_SIDE|OPERATOR_ID\n";
 
   aggregates_csv.open(_export_folder_name + "/aggregates.csv");
   aggregates_csv << "OPERATOR_TYPE|QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|GROUP_BY_COLUMN_COUNT|AGGREGATE_COLUMN_COUNT|INPUT_CHUNK_COUNT|INPUT_ROW_COUNT|OUTPUT_CHUNK_COUNT|OUTPUT_ROW_COUNT|";
@@ -218,21 +218,31 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
     const auto& left_input_perf_data = op->left_input()->performance_data;
     const auto& right_input_perf_data = op->right_input()->performance_data;
 
+    auto left_input_chunks = left_input_perf_data->output_chunk_count;
+    auto left_input_rows = left_input_perf_data->output_row_count;
+    auto right_input_chunks = right_input_perf_data->output_chunk_count;
+    auto right_input_rows = right_input_perf_data->output_row_count;
+
     // Check if the join predicate has been switched (hence, it differs between LQP and PQP) which is done when
     // table A and B are joined but the join predicate is "flipped" (e.g., b.x = a.x). The effect of flipping is that
     // the predicates are in the order (left/right) as the join input tables are.
-    if (!operator_predicate->is_flipped()) {
-      ss << left_table_name << "|" << column_name_0 << "|" << left_input_perf_data->output_chunk_count
+    if (operator_predicate->is_flipped()) {
+      std::swap(left_table_name, right_table_name);
+      std::swap(column_name_0, column_name_1);
+      std::swap(left_column_type, right_column_type);
+    }
+    ss << left_table_name << "|" << column_name_0 << "|" << left_input_chunks
+         << "|" << left_input_rows << "|" << left_column_type << "|";
+      ss << right_table_name << "|" << column_name_1 << "|" << right_input_chunks
+         << "|" << right_input_rows << "|" << right_column_type << "|";
+
+
+    /*
+     ss << left_table_name << "|" << column_name_0 << "|" << left_input_perf_data->output_chunk_count
          << "|" << left_input_perf_data->output_row_count << "|" << left_column_type << "|";
       ss << right_table_name << "|" << column_name_1 << "|" << right_input_perf_data->output_chunk_count
          << "|" << right_input_perf_data->output_row_count << "|" << right_column_type << "|";
-    } else {
-      ss << right_table_name << "|" << column_name_1 << "|" << left_input_perf_data->output_chunk_count
-         << "|" << left_input_perf_data->output_row_count << "|" << right_column_type << "|";
-      ss << left_table_name << "|" << column_name_0 << "|" << right_input_perf_data->output_chunk_count
-         << "|" << right_input_perf_data->output_row_count << "|" << left_column_type << "|";
-    }
-
+     */
 
 
     const auto& perf_data = op->performance_data;    
@@ -259,25 +269,29 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
       std::string probe_side, build_side;
 
       if (join_hash_perf_data.right_input_is_build_side) {
-        probe_column_propagates_sortedness = _propagates_sortedness(op->left_input());
-        build_column_propagates_sortedness = _propagates_sortedness(op->right_input());
+        //probe_column_propagates_sortedness = _propagates_sortedness(op->left_input());
+        probe_column_propagates_sortedness = _data_arrives_ordered(op->left_input(), left_table_name);
+        //build_column_propagates_sortedness = _propagates_sortedness(op->right_input());
+        build_column_propagates_sortedness = _data_arrives_ordered(op->right_input(), right_table_name);
         probe_side = "LEFT";
         build_side = "RIGHT";
       } else {
-        probe_column_propagates_sortedness = _propagates_sortedness(op->right_input());
-        build_column_propagates_sortedness = _propagates_sortedness(op->left_input());
+        //probe_column_propagates_sortedness = _propagates_sortedness(op->right_input());
+        probe_column_propagates_sortedness = _data_arrives_ordered(op->right_input(), right_table_name);
+        //build_column_propagates_sortedness = _propagates_sortedness(op->left_input());
+        build_column_propagates_sortedness = _data_arrives_ordered(op->left_input(), left_table_name);
         probe_side = "RIGHT";
         build_side = "LEFT";
       }
 
       ss << build_column_propagates_sortedness << "|" << probe_column_propagates_sortedness << "|";
-      ss << probe_side << "|" << build_side << "\n";
+      ss << probe_side << "|" << build_side << "|" << op->performance_data->operator_id << "\n";
     } else {
       ss << "FALSE|NULL|";
       for (auto index = size_t{0}; index < magic_enum::enum_count<JoinHash::OperatorSteps>(); ++index) {
         ss << "NULL|";
       }
-      ss << "0|0|NULL|NULL\n";
+      ss << "0|0|NULL|NULL|" << op->performance_data->operator_id << "\n";
     }
   } else {
     ss << "UNEXPECTED join operator_predicate.has_value()";
@@ -320,6 +334,53 @@ bool PlanCacheCsvExporter::_propagates_sortedness(const std::shared_ptr<const Ab
   }
 
   return propagates;
+}
+
+// Assumption: just one GetTable per table 
+bool PlanCacheCsvExporter::_data_arrives_ordered(const std::shared_ptr<const AbstractOperator>& op, const std::string& table_name) const {
+  const auto& type = op->type();
+  if (type == OperatorType::Aggregate) {
+    return false;
+  } else if (type == OperatorType::GetTable) {
+    const auto get_table = dynamic_pointer_cast<const GetTable>(op);
+    Assert(get_table, "Not a GetTable");
+    return get_table->table_name() == table_name;
+  } else if (op->right_input()) {
+    // Two inputs
+    if (type == OperatorType::JoinHash) {
+      const auto hash_join = dynamic_pointer_cast<const JoinHash>(op);
+      Assert(hash_join, "Not a JoinHash");
+      const auto mode = hash_join->mode();
+      const auto& perf_data = dynamic_cast<const JoinHash::PerformanceData&>(*hash_join->performance_data);
+      if (mode == JoinMode::Semi || mode == JoinMode::AntiNullAsTrue || mode == JoinMode::AntiNullAsFalse) {
+        if (perf_data.radix_bits == 0) {
+          if (perf_data.right_input_is_build_side) {
+            return _data_arrives_ordered(op->left_input(), table_name);
+          } else {
+            return _data_arrives_ordered(op->right_input(), table_name);
+          }
+        } else {
+          // TODO: only if there is a join with > 0 radix bits on another column
+          return false;
+        }
+      } else {
+        // TODO: if probe side, this may be unaffected instead
+        return false;
+      }
+    } else if (type == OperatorType::JoinSortMerge) {
+      // A SortMergeJoin might produce clustered data, but the original clustering does not exist anymore.
+      // TODO: If used for a benchmark where the sort merge join is more common than in TPC-H/DS, it may be worth to incorporate this knowledge
+      return false;
+    } else {
+      Assert(type == OperatorType::UnionPositions || type == OperatorType::UnionAll, "unhandled operator type: " + op->description());
+      return _data_arrives_ordered(op->left_input(), table_name);
+    }
+  } else {
+    // One input, but neither Aggregate nor GetTable
+    // This leaves TableScan, Validate, more?
+    Assert(type == OperatorType::TableScan || type == OperatorType::Validate || type == OperatorType::Projection, "unconsidered operator type: " + op->description());
+    return _data_arrives_ordered(op->left_input(), table_name);
+  }
 }
 
 void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash) {
@@ -462,7 +523,7 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
                                                  operator_perf_data.output_chunk_count,
                                                  operator_perf_data.output_row_count,
                                                  static_cast<size_t>(operator_perf_data.walltime.count()),
-                                                 description, get_operator_hash(original_get_table)});
+                                                 description, get_operator_hash(original_get_table), operator_perf_data.operator_id});
       }
     }
     return ExpressionVisitation::VisitArguments;
