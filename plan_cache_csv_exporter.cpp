@@ -76,7 +76,6 @@ PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name)
   joins_csv << "RUNTIME_NS|DESCRIPTION|";
   joins_csv << "BUILD_SORTED|PROBE_SORTED|PROBE_SIDE|BUILD_SIDE|OPERATOR_ID\n";
 
-  aggregates_csv.open(_export_folder_name + "/aggregates.csv");
   aggregates_csv << "OPERATOR_TYPE|QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|COLUMN_TYPE|TABLE_NAME|COLUMN_NAME|GROUP_BY_COLUMN_COUNT|AGGREGATE_COLUMN_COUNT|INPUT_CHUNK_COUNT|INPUT_ROW_COUNT|OUTPUT_CHUNK_COUNT|OUTPUT_ROW_COUNT|";
 
   general_operators_csv << "OPERATOR_TYPE|QUERY_HASH|OPERATOR_HASH|LEFT_INPUT_OPERATOR_HASH|RIGHT_INPUT_OPERATOR_HASH|INPUT_CHUNK_COUNT|INPUT_ROW_COUNT|OUTPUT_CHUNK_COUNT|OUTPUT_ROW_COUNT|RUNTIME_NS\n";
@@ -245,7 +244,7 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
      */
 
 
-    const auto& perf_data = op->performance_data;    
+    const auto& perf_data = op->performance_data;
     ss << perf_data->output_chunk_count << "|" << perf_data->output_row_count << "|";
     ss << join_node->node_expressions.size() << "|" << predicate_condition_to_string.left.at((*operator_predicate).predicate_condition) << "|";
 
