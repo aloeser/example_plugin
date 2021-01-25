@@ -175,7 +175,8 @@ class PlanCacheCsvExporter {
   void _process_projection(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);
   std::string _process_join(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash);
   bool _propagates_sortedness(const std::shared_ptr<const AbstractOperator>& op) const;
-  bool _data_arrives_ordered(const std::shared_ptr<const AbstractOperator>& op, const std::string& table_name) const;
+  bool _has_column(const std::shared_ptr<const AbstractOperator>& op, const std::string& column_name) const;
+  bool _data_arrives_ordered(const std::shared_ptr<const AbstractOperator>& op, const std::string& table_name, const std::string& column_name) const;
 
   const std::shared_ptr<const AbstractOperator> _get_table_operator_for_table_scan(const std::shared_ptr<const AbstractOperator> table_scan) const;
   void _process_pqp(const std::shared_ptr<const AbstractOperator>& op, const std::string& query_hex_hash,

@@ -270,16 +270,16 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
 
       if (join_hash_perf_data.right_input_is_build_side) {
         //probe_column_propagates_sortedness = _propagates_sortedness(op->left_input());
-        probe_column_propagates_sortedness = _data_arrives_ordered(op->left_input(), left_table_name);
+        probe_column_propagates_sortedness = _data_arrives_ordered(op->left_input(), left_table_name, column_name_0);
         //build_column_propagates_sortedness = _propagates_sortedness(op->right_input());
-        build_column_propagates_sortedness = _data_arrives_ordered(op->right_input(), right_table_name);
+        build_column_propagates_sortedness = _data_arrives_ordered(op->right_input(), right_table_name, column_name_1);
         probe_side = "LEFT";
         build_side = "RIGHT";
       } else {
         //probe_column_propagates_sortedness = _propagates_sortedness(op->right_input());
-        probe_column_propagates_sortedness = _data_arrives_ordered(op->right_input(), right_table_name);
+        probe_column_propagates_sortedness = _data_arrives_ordered(op->right_input(), right_table_name, column_name_1);
         //build_column_propagates_sortedness = _propagates_sortedness(op->left_input());
-        build_column_propagates_sortedness = _data_arrives_ordered(op->left_input(), left_table_name);
+        build_column_propagates_sortedness = _data_arrives_ordered(op->left_input(), left_table_name, column_name_0);
         probe_side = "RIGHT";
         build_side = "LEFT";
       }
@@ -336,8 +336,25 @@ bool PlanCacheCsvExporter::_propagates_sortedness(const std::shared_ptr<const Ab
   return propagates;
 }
 
+bool PlanCacheCsvExporter::_has_column(const std::shared_ptr<const AbstractOperator>& op, const std::string& column_name) const {
+  const auto lqp_node = op->lqp_node;
+
+  if (!lqp_node) {
+    std::cout << "found an operator which has no lqp node: " << op->description() << std::endl;
+    return false;
+  }
+
+  const auto& expressions = lqp_node->output_expressions();
+  for (const auto& expression : expressions) {
+    if (expression->as_column_name() == column_name) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Assumption: just one GetTable per table 
-bool PlanCacheCsvExporter::_data_arrives_ordered(const std::shared_ptr<const AbstractOperator>& op, const std::string& table_name) const {
+bool PlanCacheCsvExporter::_data_arrives_ordered(const std::shared_ptr<const AbstractOperator>& op, const std::string& table_name, const std::string& column_name) const {
   const auto& type = op->type();
   if (type == OperatorType::Aggregate) {
     return false;
@@ -352,19 +369,35 @@ bool PlanCacheCsvExporter::_data_arrives_ordered(const std::shared_ptr<const Abs
       Assert(hash_join, "Not a JoinHash");
       const auto mode = hash_join->mode();
       const auto& perf_data = dynamic_cast<const JoinHash::PerformanceData&>(*hash_join->performance_data);
-      if (mode == JoinMode::Semi || mode == JoinMode::AntiNullAsTrue || mode == JoinMode::AntiNullAsFalse) {
-        if (perf_data.radix_bits == 0) {
+      if (perf_data.radix_bits == 0) {
+        if (mode == JoinMode::Semi || mode == JoinMode::AntiNullAsTrue || mode == JoinMode::AntiNullAsFalse) {        
           if (perf_data.right_input_is_build_side) {
-            return _data_arrives_ordered(op->left_input(), table_name);
+            return _data_arrives_ordered(op->left_input(), table_name, column_name);
           } else {
-            return _data_arrives_ordered(op->right_input(), table_name);
+            return _data_arrives_ordered(op->right_input(), table_name, column_name);
           }
         } else {
-          // TODO: only if there is a join with > 0 radix bits on another column
-          return false;
+          // TODO: if probe side, this may be unaffected instead        
+          if (perf_data.right_input_is_build_side) {
+            if (_has_column(op->left_input(), column_name)) {
+              // table was on probe side
+              return _data_arrives_ordered(op->left_input(), table_name, column_name);
+            } else {
+              // table was on build side
+              return false;
+            }
+          } else {
+            if (_has_column(op->right_input(), column_name)) {
+              // table was on probe side
+              return _data_arrives_ordered(op->right_input(), table_name, column_name);
+            } else {
+              // table was on build side
+              return false;
+            }
+          }
         }
       } else {
-        // TODO: if probe side, this may be unaffected instead
+        // TODO: only if there is a join with > 0 radix bits on another column
         return false;
       }
     } else if (type == OperatorType::JoinSortMerge) {
@@ -373,13 +406,13 @@ bool PlanCacheCsvExporter::_data_arrives_ordered(const std::shared_ptr<const Abs
       return false;
     } else {
       Assert(type == OperatorType::UnionPositions || type == OperatorType::UnionAll, "unhandled operator type: " + op->description());
-      return _data_arrives_ordered(op->left_input(), table_name);
+      return _data_arrives_ordered(op->left_input(), table_name, column_name);
     }
   } else {
     // One input, but neither Aggregate nor GetTable
     // This leaves TableScan, Validate, more?
     Assert(type == OperatorType::TableScan || type == OperatorType::Validate || type == OperatorType::Projection, "unconsidered operator type: " + op->description());
-    return _data_arrives_ordered(op->left_input(), table_name);
+    return _data_arrives_ordered(op->left_input(), table_name, column_name);
   }
 }
 
