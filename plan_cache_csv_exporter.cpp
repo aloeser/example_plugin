@@ -84,7 +84,7 @@ PlanCacheCsvExporter::PlanCacheCsvExporter(const std::string export_folder_name)
     const auto step_name_str = std::string{step_name};
     aggregates_csv << camel_to_csv_row_title(step_name_str) << "_NS|";
   }
-  aggregates_csv << "RUNTIME_NS|DESCRIPTION\n";
+  aggregates_csv << "RUNTIME_NS|DESCRIPTION|INPUT_ORDERED\n";
 
   joins_csv.close();
   general_operators_csv.close();
@@ -409,8 +409,8 @@ bool PlanCacheCsvExporter::_data_arrives_ordered(const std::shared_ptr<const Abs
     }
   } else {
     // One input, but neither Aggregate nor GetTable
-    // This leaves TableScan, Validate, more?
-    Assert(type == OperatorType::TableScan || type == OperatorType::Validate || type == OperatorType::Projection, "unconsidered operator type: " + op->description());
+    // This leaves TableScan, Validate, Alias, more?
+    Assert(type == OperatorType::TableScan || type == OperatorType::Validate || type == OperatorType::Projection || type == OperatorType::Alias, "unconsidered operator type: " + op->description());
     return _data_arrives_ordered(op->left_input(), table_name, column_name);
   }
 }
@@ -664,7 +664,9 @@ std::string PlanCacheCsvExporter::_process_aggregate(const std::shared_ptr<const
             }
           }
           ss << perf_data->walltime.count() << "|\"";
-          ss << op->description() << "\"\n";
+          ss << op->description() << "\"|";
+
+          ss << _data_arrives_ordered(op->left_input(), table_name, column_name) << "\n";
         }
       }
       return ExpressionVisitation::VisitArguments;
