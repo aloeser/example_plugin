@@ -5,8 +5,10 @@
 #include "expression/abstract_predicate_expression.hpp"
 #include "expression/expression_utils.hpp"
 #include "expression/lqp_column_expression.hpp"
+#include "logical_query_plan/aggregate_node.hpp"
 #include "logical_query_plan/join_node.hpp"
 #include "logical_query_plan/predicate_node.hpp"
+#include "logical_query_plan/projection_node.hpp"
 #include "logical_query_plan/stored_table_node.hpp"
 #include "operators/abstract_aggregate_operator.hpp"
 #include "operators/abstract_join_operator.hpp"
@@ -253,7 +255,7 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
       const auto& join_hash_perf_data = dynamic_cast<const JoinHash::PerformanceData&>(*join_hash_op->performance_data);
       
 
-      const auto flipped = join_hash_perf_data.right_input_is_build_side ? "TRUE" : "FALSE";
+      const auto flipped = !join_hash_perf_data.left_input_is_build_side ? "TRUE" : "FALSE";
 
       ss << flipped << "|" << join_hash_perf_data.radix_bits << "|";
 
@@ -267,7 +269,7 @@ std::string PlanCacheCsvExporter::_process_join(const std::shared_ptr<const Abst
       bool build_column_propagates_sortedness = false;
       std::string probe_side, build_side;
 
-      if (join_hash_perf_data.right_input_is_build_side) {
+      if (!join_hash_perf_data.left_input_is_build_side) {
         //probe_column_propagates_sortedness = _propagates_sortedness(op->left_input());
         probe_column_propagates_sortedness = _data_arrives_ordered(op->left_input(), left_table_name, column_name_0);
         //build_column_propagates_sortedness = _propagates_sortedness(op->right_input());
@@ -370,14 +372,14 @@ bool PlanCacheCsvExporter::_data_arrives_ordered(const std::shared_ptr<const Abs
       const auto& perf_data = dynamic_cast<const JoinHash::PerformanceData&>(*hash_join->performance_data);
       if (perf_data.radix_bits == 0) {
         if (mode == JoinMode::Semi || mode == JoinMode::AntiNullAsTrue || mode == JoinMode::AntiNullAsFalse) {        
-          if (perf_data.right_input_is_build_side) {
+          if (!perf_data.left_input_is_build_side) {
             return _data_arrives_ordered(op->left_input(), table_name, column_name);
           } else {
             return _data_arrives_ordered(op->right_input(), table_name, column_name);
           }
         } else {
           // TODO: if probe side, this may be unaffected instead        
-          if (perf_data.right_input_is_build_side) {
+          if (!perf_data.left_input_is_build_side) {
             if (_has_column(op->left_input(), column_name)) {
               // table was on probe side
               return _data_arrives_ordered(op->left_input(), table_name, column_name);
@@ -464,7 +466,7 @@ void PlanCacheCsvExporter::_process_table_scan(const std::shared_ptr<const Abstr
         // TODO: I think we want all scans to better estimate pruning effects on joins, but this requires some additional field to log whether data can arrive sorted
 
         std::cout << "walking down the pqp, ignoring a " << current_op->description() << std::endl;
-        if (join_hash_perf_data.right_input_is_build_side) {
+        if (!join_hash_perf_data.left_input_is_build_side) {
           current_op = current_op->left_input();
         } else {
           current_op = current_op->right_input();
